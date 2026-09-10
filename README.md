@@ -310,6 +310,17 @@ vless://<NODE_ID>@<你的域名>?encryption=none&security=tls&sni=<你的域名>
 **你自己的节点，权威来源是容器真正在用的那两个值**（`NODE_ID` 和 `WS_PATH`）。
 `./sub/make-subscription.sh` 就是拿它们拼出链接的，把打印出来的那条粘进节点池即可。
 
+**如果你只有 Karing 里的配置**：它虽然导不出链接，但可以把配置以 **JSON** 显示/复制出来。
+把那段 JSON 转成标准链接：
+
+```sh
+node sub/json-to-link.mjs '{"server":"...","type":"vless",...}'
+```
+
+它会告诉你**哪些设置标准链接装不下、因此被丢掉了**——最关键的是自定义
+WebSocket 头（例如 `X-Origin-Key`）。丢了它，这条链接就**不能直连源站**，
+但**经 Cloudflare 域名可以用**，因为那一段的头是 Worker 自己加的。
+
 如果你手上有一条来路不明的链接（比如从别处复制的、或在 Karing 里手填过的），
 先核对它和你的容器是否一致：
 
@@ -727,6 +738,7 @@ sub/
   worker.js                    订阅服务（KV + 多订阅 + 管理页，单文件粘贴即用）
   make-subscription.sh         生成管理凭据与第一条节点链接
   check-link.mjs               核对一条分享链接和容器配置是否一致
+  json-to-link.mjs             把 sing-box 的 JSON 配置转成标准分享链接
   test.mjs                     订阅逻辑的回归测试
 worker/
   src/index.js                 多文件版 Worker（配合 site/ 静态资源）
