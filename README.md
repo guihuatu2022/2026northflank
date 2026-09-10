@@ -293,6 +293,108 @@ vless://<NODE_ID>@<你的域名>?encryption=none&security=tls&sni=<你的域名>
 
 ---
 
+## 订阅地址（可选）
+
+如果你只有一台节点、一两台设备，**手动填客户端配置就够了，不需要订阅**。订阅的意义是：多设备、多节点时，改一次全部生效。
+
+但订阅 URL 有一个固有性质要先说清楚：**它是不记名凭证**。没有账号密码，URL 本身就是密码——谁拿到 URL，谁就拿到你的全部节点。
+
+所以这里的实现和网上常见的那些不一样，刻意砍掉了几乎所有功能：
+
+| 网上常见的实现 | 这里 |
+|---|---|
+| 有默认 token（忘设变量就用默认值） | **没有默认值**，变量不合格就不服务 |
+| 访客 token / 每日 token 由主 token 派生 | **不做派生**——派生不增加熵，只增加泄露面 |
+| 带 KV 编辑页，能 POST 改写节点 | **完全只读**，没有编辑页、不处理 POST |
+| 内置第三方聚合订阅地址 | **不向任何第三方发请求** |
+| 在线订阅转换（Clash / sing-box） | 格式由你给的变量决定，不调第三方 |
+| 伪装成 nginx 默认页 | 统一 404，没有可指纹的内容 |
+
+### 部署（三步）
+
+**第 1 步：生成参数**
+
+```sh
+cd ~/cloudflare/nf-node
+./sub/make-subscription.sh
+```
+
+它会复用 `~/.nf-node-secrets` 里的凭据，问你隧道域名，然后打印出两个值：`SUB_KEY` 和 `NODES`。
+
+想加别的节点，把它们一行一个写进 `~/.nf-node-extra-nodes` 再重跑。
+
+**第 2 步：新建一个 Worker**
+
+⚠️ 用**独立的域名**，不要和隧道、伪装站共用。
+
+1. Cloudflare 控制台 → **Workers & Pages** → **Create** → **Worker** → 起名 → **Deploy**
+2. **Edit code** → 把 `sub/worker.js` 的全部内容粘进去 → **Deploy**
+3. **Settings** → **Variables and Secrets** → 加两个变量，**两个都选 Secret 类型**：
+   - `SUB_KEY` = 上一步打印的值
+   - `NODES` = 上一步打印的值
+4. **Settings** → **Domains & Routes** → **Add** → **Custom Domain** → 填订阅域名
+5. 如果列表里有 `*.workers.dev`，**删掉**
+
+**第 3 步：验证**
+
+```sh
+curl -s -A 'v2rayN/6.0' 'https://你的订阅域名/<SUB_KEY>' | base64 -d
+```
+
+能看到节点链接就成功了。
+
+> **注意要加 `-A`。** 默认的 `curl` UA 会被采集器规则拦掉——这是有意的。
+
+### 环境变量
+
+| 名称 | 必填 | 说明 |
+|---|---|---|
+| `SUB_KEY` | ✅ | 路径里那段随机值，32 位十六进制。**少于 24 位就直接不服务** |
+| `NODES` | ✅ | 节点链接，一行一个；也可以直接填已经 base64 过的内容 |
+| `NODES_CLASH` | | Clash / Mihomo 用的完整 YAML。不填则 Clash 客户端也拿 base64 |
+| `UA_MODE` | | `nobrowser`（默认）/ `clients` / `any` |
+| `SUB_NAME` | | 客户端里显示的订阅名，默认 `nf-node` |
+| `UPDATE_HOURS` | | 建议更新间隔，默认 6 |
+| `ALERT_WEBHOOK` | | 可选。每次取订阅时 POST 一条通知（只有事件名 + 国家 + 机房代码，**不含 IP**），用来发现地址被别人用了 |
+
+### `UA_MODE` 怎么选
+
+| 值 | 行为 |
+|---|---|
+| **`nobrowser`（默认）** | 拒绝浏览器和常见采集器（curl、python-requests、go-http-client…），其余放行 |
+| `clients` | 只放行已知客户端 UA（v2rayN、Clash、sing-box、Shadowrocket…）。最严，但客户端五花八门，有误伤风险 |
+| `any` | 不过滤，只在调试时用 |
+
+**要诚实说明：UA 过滤只是降低噪声，不是安全边界。** 会伪造 UA 的人照样能过。**真正的安全边界是 `SUB_KEY` 的 128 位熵**——那个猜不到。
+
+### 改了节点怎么更新
+
+```sh
+./sub/make-subscription.sh          # 重新生成
+```
+
+然后到 Worker 的 Variables and Secrets 里把 `NODES` 换成新值。**不需要改代码、不需要重新部署。**
+
+### 怀疑地址泄露了怎么办
+
+1. 重跑 `./sub/make-subscription.sh` 拿一个新的 `SUB_KEY`
+2. 在 Worker 里替换 `SUB_KEY`
+3. 在客户端里更新订阅地址
+
+旧的地址立刻失效。这也是为什么**别把 `SUB_KEY` 设成好记的字符串**——更换成本很低，不值得为好记牺牲熵。
+
+如果你设了 `ALERT_WEBHOOK`，别人拿你的地址去取订阅时你会收到通知，这就是泄露的信号。
+
+### 关于限速
+
+Workers 免费版没有按 IP 限速的能力。但配合 128 位随机路径，穷举已经不现实。想要更硬的防护，最合适的位置是 **Cloudflare 的 Rate Limiting 规则**（在域名层面配置，不写代码），不过那需要付费套餐。
+
+### 排障
+
+对外一律返回 404，所以从外面看不出配置哪里有问题。**用 `npx wrangler tail` 看日志**，配置问题会打在里面（比如 `SUB_KEY 未设置或长度不足`）。
+
+---
+
 ## 觉得慢？
 
 ### 先搞清楚慢在哪
@@ -527,6 +629,9 @@ Dockerfile                     多阶段构建：裁剪版引擎 + gateway
 deploy.sh                      一键部署 Worker 的脚本
 .github/workflows/build.yml    push 后自动构建镜像
 front/                         容器入口（Go）
+sub/
+  worker.js                    安全订阅 Worker（单文件，粘贴即用）
+  make-subscription.sh         生成 SUB_KEY 和 NODES
 worker/
   src/index.js                 多文件版 Worker（配合 site/ 静态资源）
   standalone.js                单文件版 Worker（伪装站已内联，供控制台粘贴）
