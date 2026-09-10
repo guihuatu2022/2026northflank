@@ -7,7 +7,8 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "check": "wrangler deploy --dry-run --outdir /tmp/nf-node-edge-dryrun"
+    "check": "wrangler deploy --dry-run --outdir /tmp/nf-node-edge-dryrun",
+    "standalone": "node build-standalone.mjs"
   },
   "devDependencies": {
     "wrangler": "^4"

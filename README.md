@@ -75,29 +75,78 @@ port-name--service-name--abc123.code.run
 
 ---
 
-## 第 4 步：再跑一次脚本，部署 Worker
+## 第 4 步：部署 Worker（两种方式，任选一种）
+
+两种方式效果完全一样，最后攻击面也一样。**不想装任何东西就选方式 A。**
+
+### 方式 A：控制台粘贴单文件（推荐新手）
+
+```sh
+cd ~/cloudflare/nf-node
+./deploy.sh --paste
+```
+
+它会问你容器的域名，然后生成一个文件：
+
+```
+~/nf-node-worker.js
+```
+
+**三个密码已经自动填进去了**，你只要复制粘贴。接下来在浏览器里：
+
+1. 打开 https://dash.cloudflare.com
+2. **Workers & Pages** → **Create** → **Worker** → 起个名字 → **Deploy**
+3. 点 **Edit code**，把编辑器里的内容**全选删掉**，粘贴 `~/nf-node-worker.js` 的全部内容，再点 **Deploy**
+
+   想直接复制到剪贴板（需要先 `sudo apt install xclip`）：
+
+   ```sh
+   cat ~/nf-node-worker.js | xclip -selection clipboard
+   ```
+
+4. 继续做下面「绑定你自己的域名」那一段
+
+> 这个文件里含密码，所以写在你的家目录、权限 600，**不要提交到 GitHub**。
+>
+> 在控制台创建的 Worker 会自带一个 `*.workers.dev` 路由，记得在下面那一步一并删掉。
+
+### 方式 B：命令行自动部署
 
 ```sh
 cd ~/cloudflare/nf-node
 ./deploy.sh
 ```
 
-这次它会做三件事：
+这次它会：问你容器域名 → 打开浏览器让你登录 Cloudflare（**不需要输入任何码**）→ 自动部署。
 
-1. 问你上一步那个 `code.run` 域名 —— 粘贴进去，回车
-2. 打开浏览器让你登录 Cloudflare（**不需要输入任何码**，点一下同意就行）
-3. 部署 Worker，并把密码一起传上去
+密码不会写进代码，而是作为 Worker 的 Secret 存在 Cloudflare 上。
 
-看到「Worker 部署完成」就好了。以后改了伪装站内容，再跑一次这条命令就能更新。
+> 方式 B 需要 Node.js，脚本会自动装好 wrangler（约 30 秒）。
+
+### 改了伪装站之后怎么办
+
+两种方式都要重新发布一次：
+
+```sh
+cd ~/cloudflare/nf-node
+
+# 只有方式 A 需要这一步：把 site/ 的内容重新打包成单文件
+node worker/build-standalone.mjs
+./deploy.sh --paste        # 重新生成可粘贴文件，再去控制台粘贴
+
+# 方式 B 直接一条命令：
+./deploy.sh
+```
 
 ### 最后：给 Worker 绑一个自己的域名
 
-脚本已经把 `*.workers.dev` 关掉了（那个域名会被扫描器找到），所以**不绑域名就没有入口**：
+**不绑域名就没有入口**（方式 A 需要自己删掉 `workers.dev` 路由；方式 B 里脚本已经关掉了）：
 
 1. 打开 https://dash.cloudflare.com
-2. 左边点 **Workers & Pages** → 选中 **nf-node-edge**
-3. **Settings** → **Domains & Routes** → **Add** → **Custom Domain**
-4. 填一个子域名，例如 `cdn.你的域名.com`，确认
+2. 左边点 **Workers & Pages** → 选中你的 Worker
+3. **Settings** → **Domains & Routes**
+4. **Add** → **Custom Domain** → 填一个子域名，例如 `cdn.你的域名.com`，确认
+5. 如果列表里有 `*.workers.dev`，把它**删掉**
 
 等一两分钟证书签发完就生效了。
 
@@ -330,8 +379,10 @@ deploy.sh                      一键部署 Worker 的脚本
 .github/workflows/build.yml    push 后自动构建镜像
 front/                         容器入口（Go）
 worker/
-  src/index.js                 Worker 脚本
-  wrangler.jsonc               部署配置
+  src/index.js                 多文件版 Worker（配合 site/ 静态资源）
+  standalone.js                单文件版 Worker（伪装站已内联，供控制台粘贴）
+  build-standalone.mjs         从 site/ 重新生成 standalone.js
+  wrangler.jsonc               部署配置（只有多文件版用得到）
   site/                        伪装站（请定制）
 third_party/                   第三方许可证
 ```

@@ -22,6 +22,24 @@ die()  { printf '%s%s%s\n' "$RED" "$*" "$OFF" >&2; exit 1; }
 SECRETS="$HOME/.nf-node-secrets"
 WORKER_DIR="worker"
 
+# 第一种模式（默认）：用命令行部署
+# 第二种模式（--paste）：生成一份填好值的单文件 Worker，供你复制粘贴到控制台
+MODE="deploy"
+case "${1:-}" in
+  ""|--deploy) MODE="deploy" ;;
+  --paste|paste) MODE="paste" ;;
+  -h|--help)
+    cat <<'EOF'
+用法：
+  ./deploy.sh            正常流程：生成密钥、部署 Worker
+  ./deploy.sh --paste    生成一份可直接粘贴到 Cloudflare 控制台的单文件 Worker
+
+两种方式二选一即可，效果相同。
+EOF
+    exit 0 ;;
+  *) die "未知参数：$1   （可用：--paste，或 -h 看帮助）" ;;
+esac
+
 rand_hex() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex "$1"
@@ -116,6 +134,54 @@ fi
 ORIGIN_HOST="${ORIGIN_HOST#http://}"; ORIGIN_HOST="${ORIGIN_HOST#https://}"; ORIGIN_HOST="${ORIGIN_HOST%/}"
 [[ "$ORIGIN_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || die "ORIGIN_HOST 看起来不是域名：$ORIGIN_HOST"
 printf '     容器域名：%s\n' "$ORIGIN_HOST"
+
+# ------------------------------------------------------ 模式 A：生成可粘贴文件
+if [ "$MODE" = "paste" ]; then
+  say "3/3  生成可粘贴的单文件 Worker"
+  [ -f "$WORKER_DIR/standalone.js" ] || die "缺少 $WORKER_DIR/standalone.js"
+
+  # 用 sed 替换文件顶部那三行常量。值里可能含 / 和 |，用 | 作分隔符并对值转义。
+  OUT_FILE="$HOME/nf-node-worker.js"
+  sed \
+    -e "s|^const WS_PATH = .*|const WS_PATH = \"${WS_PATH}\";|" \
+    -e "s|^const ORIGIN_HOST = .*|const ORIGIN_HOST = \"${ORIGIN_HOST}\";|" \
+    -e "s|^const ORIGIN_SECRET = .*|const ORIGIN_SECRET = \"${ORIGIN_SECRET}\";|" \
+    "$WORKER_DIR/standalone.js" > "$OUT_FILE"
+  chmod 600 "$OUT_FILE"
+
+  node --check "$OUT_FILE" 2>/dev/null \
+    || warn "  生成的脚本语法检查没通过，请把这个问题反馈一下"
+
+  ok "  已生成：$OUT_FILE"
+  cat <<EOF
+
+  ─────────────────────────────────────────────────────────────
+  接下来在浏览器里操作（不需要命令行、不需要装 wrangler）：
+
+    1. https://dash.cloudflare.com
+       -> Workers & Pages -> Create -> Worker -> 起个名字 -> Deploy
+
+    2. 点 Edit code，把编辑器里的内容全选删掉，
+       然后粘贴 ${OUT_FILE} 的全部内容，再点 Deploy
+
+       快速把内容复制到剪贴板：
+         cat ${OUT_FILE} | xclip -selection clipboard
+       （没装 xclip 就手动打开文件全选复制）
+
+    3. Settings -> Domains & Routes：
+         - Add -> Custom Domain -> 填 cdn.你的域名.com
+         - 删掉自动分配的 *.workers.dev 路由
+
+    4. 在同一个页面上确认这两项是关闭的：
+         - Bot Fight Mode
+         - 安全挑战 / Under Attack 模式
+  ─────────────────────────────────────────────────────────────
+
+  这个文件里含你的密钥，所以写在你家目录而不是仓库里，
+  也不要提交到 GitHub。权限已设为 600。
+EOF
+  exit 0
+fi
 
 # ------------------------------------------------------------ 4. 依赖与登录
 say "3/4  准备 wrangler"
