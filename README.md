@@ -252,6 +252,7 @@ vless://<NODE_ID>@<你的域名>?encryption=none&security=tls&sni=<你的域名>
 
 | 现象 | 原因 | 怎么办 |
 |---|---|---|
+| **直连 Northflank 域名能用，套了 CDN 就不行** | 问题出在 Cloudflare 这一段 | **跑 `./diagnose.sh`**，它会逐项测试并指出是路径不一致、域名填错还是 CF 挑战 |
 | 网页打不开，显示 Cloudflare 错误 | 没绑自定义域名 | 回到第 3 步最后一步 |
 | 网页正常，但客户端连不上 | 三处 `WS_PATH` 不一致 | `cat ~/.nf-node-secrets` 对一遍：Worker 里、Northflank 里、客户端里 |
 | 网页 404、样式很朴素 | 你访问的是 Northflank 的 `code.run` 域名 | 这是正常的，伪装站只在 Cloudflare 上 |
