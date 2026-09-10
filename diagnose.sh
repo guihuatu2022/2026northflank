@@ -159,9 +159,13 @@ info "状态行: ${T5L:-（无响应）}"
 if has "$T5L" '101'; then
   ok "源站侧升级成功（101）—— 容器与 sing-box 没问题"
 elif has "$T5L" '404'; then
-  bad "源站侧返回 404 —— 容器里的 WS_PATH 与这个不一致"
-  if [ -z "$ORIGIN_SECRET" ]; then
-    info "另外：如果容器里其实设置了 ORIGIN_SECRET，而这里没提供，也会是这个结果"
+  if [ -n "$ORIGIN_SECRET" ]; then
+    bad "源站侧返回 404，且你已经填了 ORIGIN_SECRET"
+    info "两种可能：容器里的密钥与这个不同，或者 X-Origin-Key 头在中间层被剥掉了"
+    info "建议先把两边的 ORIGIN_SECRET 都清空，确认能通之后再一起设上"
+  else
+    bad "源站侧返回 404 —— 可能是容器里的 WS_PATH 与这个不一致"
+    info "如果容器里其实设置了 ORIGIN_SECRET（这里留空了），也会是这个结果"
   fi
 else
   warn "源站响应异常"
