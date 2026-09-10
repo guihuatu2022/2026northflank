@@ -25,7 +25,7 @@
  * hands it to the client directly.
  *
  * Configuration (see README):
- *   WS_PATH       - secret path prefix, e.g. /assets/2026/xxxxxxxx
+ *   WS_PATH       - secret path prefix, e.g. /assets/app.3f9c1a7e5b2d4806.js
  *   ORIGIN_HOST   - the container's public hostname
  *   ORIGIN_SECRET - shared secret added on the edge -> origin leg only
  */

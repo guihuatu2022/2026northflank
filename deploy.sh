@@ -71,7 +71,7 @@ else
   printf '     首次运行，生成新的密钥并保存到 %s\n' "$SECRETS"
   ( umask 077; cat > "$SECRETS" <<EOF
 NODE_ID=$(new_uuid)
-WS_PATH=/assets/2026/$(rand_hex 16)
+WS_PATH=/assets/app.$(rand_hex 16).js
 ORIGIN_SECRET=$(rand_hex 24)
 EOF
   )

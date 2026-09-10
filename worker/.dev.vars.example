@@ -1,6 +1,11 @@
 # 复制成 .dev.vars 供 `npm run dev` 使用。真正的值永远不要提交。
 #
 # 下面三个值都算秘密：拿到它们的人就能用你的隧道。
-WS_PATH="/assets/2026/换成一长串随机字符"
+#
+# WS_PATH 的格式刻意做得像站点自己的构建产物：
+#   /assets/app.<32 位随机十六进制>.js
+# 生成一条：
+#   echo "/assets/app.$(openssl rand -hex 16).js"
+WS_PATH="/assets/app.3f9c1a7e5b2d4806a1b2c3d4e5f60718.js"
 ORIGIN_HOST="端口名--服务名--随机串.code.run"
 ORIGIN_SECRET="再换一段随机字符串"
