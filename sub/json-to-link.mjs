@@ -1,21 +1,26 @@
 #!/usr/bin/env node
 /**
- * 把 sing-box 格式的节点配置（JSON）转成标准分享链接。
+ * 把 sing-box 格式的节点配置（JSON）转成标准分享链接 —— 命令行版。
  *
  * 为什么需要它：Karing 的「分享」只产出 ulink:// 私有格式，导不出标准链接
  * （KaringX/karing#1332，作者回复 no plan）。但它可以把配置以 JSON 显示/复制
  * 出来，从 JSON 就能还原成标准链接。
  *
+ * 转换逻辑本身在 sub/worker.js 里 —— 那个文件同时也是部署到 Cloudflare 的
+ * 完整代码，管理页上的「从 JSON 导入节点」调用的就是同一份函数。
+ * 这个脚本只是给它套一层命令行外壳，所以两边永远不会转出不一样的结果。
+ *
  * 跑法：
  *   node sub/json-to-link.mjs '{"server":"...","type":"vless",...}'
  *   node sub/json-to-link.mjs < config.json
  *   node sub/json-to-link.mjs            # 交互式粘贴，Ctrl-D 结束
+ *   node sub/json-to-link.mjs '...' > nodes.txt   # 只导出链接，便于重定向
  *
- * 会明确列出**标准分享链接表达不了、因此被丢掉**的字段 —— 最关键的是
- * 自定义 WebSocket 头（例如 X-Origin-Key）。丢了它，直连源站会被拒绝。
+ * 输出约定：链接走 stdout（一行一条，可直接重定向），
+ *           被丢弃的字段和失败原因走 stderr（不污染管道）。
  */
 
-import readline from "node:readline";
+import { outboundToLink, extractOutbounds } from "./worker.js";
 
 const BOLD = "\x1b[1m";
 const RED = "\x1b[31m";
@@ -33,223 +38,99 @@ function readStdin() {
   });
 }
 
+function die(msg) {
+  console.error(`${RED}${msg}${OFF}`);
+  process.exit(1);
+}
+
 let raw = process.argv.slice(2).join(" ").trim();
 if (!raw) {
-  if (!process.stdin.isTTY) {
-    raw = (await readStdin()).trim();
-  } else {
+  if (process.stdin.isTTY) {
     console.log(`${BOLD}把配置 JSON 粘进来，粘完按 Ctrl-D：${OFF}`);
-    raw = (await readStdin()).trim();
   }
+  raw = (await readStdin()).trim();
 }
-if (!raw) {
-  console.error("没有输入内容。");
-  process.exit(1);
-}
+if (!raw) die("没有输入内容。");
 
-let obj;
+// 先单独试一次整体解析，纯粹为了能在语法出错时给出明确提示 ——
+// extractOutbounds 会静默跳过解析失败的片段，那样报错会很难懂。
+let whole = null;
 try {
-  obj = JSON.parse(raw);
-} catch (err) {
-  console.error(`${RED}JSON 解析失败：${err.message}${OFF}`);
-  process.exit(1);
+  whole = JSON.parse(raw);
+} catch {
+  /* 不是单个 JSON 对象，交给 extractOutbounds 按片段切 */
 }
 
-// 有些人会粘一个含 outbounds 的完整配置，这里自动挑出第一个可用节点
-if (!obj.type && Array.isArray(obj.outbounds)) {
-  const found = obj.outbounds.find((o) => o && o.type && o.server);
-  if (!found) {
-    console.error(`${RED}这份配置里找不到带 server 的 outbound。${OFF}`);
-    process.exit(1);
+const outbounds = extractOutbounds(raw);
+if (!outbounds.length) {
+  if (whole === null) {
+    die("JSON 解析失败。请确认粘贴的是完整的一段（从 { 开始到 } 结束）。");
   }
-  obj = found;
+  die("里面没有 JSON 对象。");
 }
 
-const warnings = [];
+const links = [];
 const lost = [];
+const failed = [];
+const skipped = [];
 
-const enc = encodeURIComponent;
-const type = String(obj.type || "").toLowerCase();
-const host = String(obj.server || "");
-const port = Number(obj.server_port || obj.port || 0);
+for (const ob of outbounds) {
+  if (!ob || typeof ob !== "object" || !ob.type || !ob.server) {
+    // direct / block / selector 这类没有 server 的 outbound，如实说明而不是假装成功
+    if (ob && typeof ob === "object" && ob.type) skipped.push(String(ob.tag || ob.type));
+    continue;
+  }
+  const label = String(ob.tag || ob.name || ob.server || ob.type);
+  try {
+    const r = outboundToLink(ob);
+    links.push(r.link);
+    for (const x of r.lost) lost.push(`${label}：${x}`);
+  } catch (err) {
+    failed.push(`${label}：${(err && err.message) || "转换失败"}`);
+  }
+}
 
-if (!host || !port) {
-  console.error(`${RED}缺少 server 或 server_port。${OFF}`);
+if (!links.length) {
+  console.error(`${RED}没有转出任何链接。${OFF}`);
+  for (const f of failed) console.error(`  ${RED}·${OFF} ${f}`);
+  if (skipped.length) {
+    console.error(`${DIM}跳过（没有 server，属于规则型 outbound）：${skipped.join("、")}${OFF}`);
+  }
   process.exit(1);
 }
 
-const q = [];
-const push = (k, v) => {
-  if (v !== undefined && v !== null && v !== "") q.push(`${k}=${v}`);
-};
+// stdout：只有链接，方便 `> nodes.txt` 或直接喂给别的脚本
+for (const l of links) console.log(l);
 
-/** TLS / uTLS / REALITY */
-function applyTls(target) {
-  const tls = target.tls || {};
-  const reality = tls.reality || {};
-  if (tls.enabled === false) return { security: "", sni: "", fp: "" };
-  const isReality = !!(reality.enabled || reality.public_key || reality.publicKey);
-  const sni = String(tls.server_name || tls.serverName || target.sni || "");
-  const utls = tls.utls || {};
-  const fp = String(utls.fingerprint || tls.fingerprint || target.fp || "");
-  if (isReality) {
-    push("security", "reality");
-    push("pbk", reality.public_key || reality.publicKey || "");
-    push("sid", reality.short_id || reality.shortId || "");
-    if (reality.spider_x || reality.spiderX) push("spx", reality.spider_x || reality.spiderX);
-  } else {
-    push("security", "tls");
-  }
-  push("sni", enc(sni));
-  push("fp", fp);
-  if (Array.isArray(tls.alpn) && tls.alpn.length) push("alpn", enc(tls.alpn.join(",")));
-  if (tls.insecure || tls.allowInsecure) push("allowInsecure", "1");
-  return { security: "tls", sni, fp };
-}
-
-/** 传输层；顺带记录标准链接表达不了的头部 */
-function applyTransport(target) {
-  const tr = target.transport || {};
-  const net = String(tr.type || "tcp").toLowerCase();
-  const headers = tr.headers || {};
-  const hostHeader =
-    headers.Host || headers.host || (Array.isArray(headers.Host) ? headers.Host[0] : "");
-
-  for (const [k, v] of Object.entries(headers)) {
-    if (/^host$/i.test(k)) continue;
-    const val = Array.isArray(v) ? v.join(", ") : String(v);
-    lost.push(
-      `自定义 WebSocket 头 ${k}: ${mask(val)} —— 标准分享链接没有承载它的字段`
-    );
-  }
-
-  if (net === "ws") {
-    push("type", "ws");
-    push("host", enc(String(hostHeader || host)));
-    push("path", enc(String(tr.path || "/")));
-  } else if (net === "grpc") {
-    push("type", "grpc");
-    push("serviceName", enc(String(tr.service_name || tr.serviceName || "")));
-    if (tr.multi_mode || tr.multiMode) push("mode", "multi");
-  } else if (net === "http" || net === "h2") {
-    push("type", "h2");
-    push("host", enc(String(hostHeader || host)));
-    push("path", enc(String(tr.path || "/")));
-  } else {
-    push("type", "tcp");
-    push("headerType", String(tr.header && tr.header.type ? tr.header.type : "none"));
-  }
-  return net;
-}
-
-function mask(s) {
-  const v = String(s);
-  return v.length <= 12 ? v : v.slice(0, 6) + "…" + v.slice(-4);
-}
-
-let link = "";
-
-if (type === "vless") {
-  const uuid = String(obj.uuid || "");
-  if (!uuid) {
-    console.error(`${RED}缺少 uuid。${OFF}`);
-    process.exit(1);
-  }
-  push("encryption", "none");
-  applyTls(obj);
-  if (obj.flow) push("flow", enc(String(obj.flow)));
-  applyTransport(obj);
-  link = `vless://${uuid}@${host}:${port}?${q.join("&")}#${enc(String(obj.tag || obj.name || ""))}`;
-} else if (type === "vmess") {
-  const j = {
-    v: "2",
-    ps: String(obj.tag || obj.name || ""),
-    add: host,
-    port: String(port),
-    id: String(obj.uuid || ""),
-    aid: String(obj.alter_id || obj.alterId || 0),
-    scy: String(obj.security || "auto"),
-    net: String((obj.transport || {}).type || "tcp"),
-    type: "none",
-    host: "",
-    path: "",
-    tls: "",
-  };
-  const tls = obj.tls || {};
-  if (tls.enabled !== false && (tls.server_name || tls.serverName || tls.enabled)) {
-    j.tls = "tls";
-    j.sni = String(tls.server_name || tls.serverName || "");
-  }
-  const tr = obj.transport || {};
-  if (j.net === "ws") {
-    j.path = String(tr.path || "/");
-    const hh = (tr.headers || {}).Host || (tr.headers || {}).host || host;
-    j.host = Array.isArray(hh) ? hh[0] : String(hh);
-    for (const k of Object.keys(tr.headers || {})) {
-      if (!/^host$/i.test(k)) {
-        lost.push(`自定义 WebSocket 头 ${k} —— 标准分享链接没有承载它的字段`);
-      }
-    }
-  } else if (j.net === "grpc") {
-    j.path = String(tr.service_name || tr.serviceName || "");
-  }
-  link = "vmess://" + Buffer.from(JSON.stringify(j), "utf8").toString("base64");
-} else if (type === "trojan") {
-  const password = String(obj.password || "");
-  if (!password) {
-    console.error(`${RED}缺少 password。${OFF}`);
-    process.exit(1);
-  }
-  const tls = obj.tls || {};
-  push("security", "tls");
-  push("sni", enc(String(tls.server_name || tls.serverName || obj.sni || host)));
-  if (Array.isArray(tls.alpn) && tls.alpn.length) push("alpn", enc(tls.alpn.join(",")));
-  applyTransport(obj);
-  link = `trojan://${enc(password)}@${host}:${port}?${q.join("&")}#${enc(
-    String(obj.tag || obj.name || "")
-  )}`;
-} else if (type === "shadowsocks" || type === "ss") {
-  const method = String(obj.method || obj.cipher || "");
-  const password = String(obj.password || "");
-  if (!method || !password) {
-    console.error(`${RED}缺少 method 或 password。${OFF}`);
-    process.exit(1);
-  }
-  const userinfo = Buffer.from(`${method}:${password}`, "utf8").toString("base64");
-  link = `ss://${userinfo}@${host}:${port}#${enc(String(obj.tag || obj.name || ""))}`;
-} else {
-  console.error(`${RED}不支持的 type：${type || "(空)"}${OFF}`);
-  console.log(`${DIM}支持的：vless / vmess / trojan / shadowsocks${OFF}`);
-  process.exit(1);
-}
-
-// 标准链接表达不了的其它设置
-const mp = obj.multiplex || obj.mux;
-if (mp && mp.enabled !== false && (mp.enabled || mp.protocol)) {
-  lost.push(
-    `多路复用（mux${mp.protocol ? " / " + mp.protocol : ""}）—— 标准链接没有这个字段，需要在客户端界面里手动开`
-  );
-}
-if (obj.udp === false) lost.push("udp: false —— 标准链接无法表达，客户端默认会开");
-
-console.log(`${BOLD}标准分享链接${OFF}\n`);
-console.log(link);
-console.log();
+// stderr：给人看的说明
+const err = (s) => console.error(s);
+err("");
+err(
+  `${BOLD}已转换 ${links.length} 条${OFF}` +
+    (skipped.length ? `${DIM}（跳过 ${skipped.length} 条规则型 outbound）${OFF}` : "")
+);
 
 if (lost.length) {
-  console.log(`${YELLOW}${BOLD}以下设置无法写进标准链接，已丢弃：${OFF}`);
-  for (const l of lost) console.log(`  ${YELLOW}·${OFF} ${l}`);
-  console.log();
-  console.log(
+  err("");
+  err(`${YELLOW}${BOLD}以下设置无法写进标准链接，已丢弃：${OFF}`);
+  for (const l of lost) err(`  ${YELLOW}·${OFF} ${l}`);
+  err("");
+  err(
     `${BOLD}注意：${OFF}自定义 WebSocket 头通常用来过源站的门禁（例如本项目的 ORIGIN_SECRET）。`
   );
-  console.log(
+  err(
     `丢掉它之后，这条链接${RED}不能直连源站${OFF}，但${GREEN}经 Cloudflare 的域名可以用${OFF}`
   );
-  console.log(`—— 因为那一段的头是 Worker 自己加的，不需要客户端提供。`);
-  console.log();
+  err(`—— 因为那一段的头是 Worker 自己加的，不需要客户端提供。`);
 }
 
-if (warnings.length) {
-  for (const w of warnings) console.log(`${YELLOW}·${OFF} ${w}`);
+if (failed.length) {
+  err("");
+  err(`${YELLOW}${BOLD}这些没转成功：${OFF}`);
+  for (const f of failed) err(`  ${YELLOW}·${OFF} ${f}`);
+}
+
+if (lost.length || failed.length) {
+  err("");
+  err(`${DIM}提示：管理页里也有同样的功能（「从 JSON 导入节点」），不用命令行。${OFF}`);
 }

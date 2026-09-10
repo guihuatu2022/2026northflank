@@ -202,5 +202,119 @@ console.log("--- 8. 管理页嵌入 JSON 的健壮性 ---");
   check("嵌入的 JSON 可解析", parsed !== null && Array.isArray(parsed.nodes));
 }
 
+console.log("--- 9. 管理页 JSON → 分享链接（/convert）---");
+{
+  const env = mkEnv();
+  await seed(env, [NODE1], [{ token: T_A, name: "A", enabled: true, uris: [NODE1] }]);
+  const writesBefore = env.KV.writes;
+  const convert = (body, headers) =>
+    mod.default.fetch(req(`/${ADMIN_PATH}`, {
+      method: "POST",
+      headers: headers || { ...basic("admin", ADMIN_PASS), "content-type": "application/json", "x-admin-action": "convert" },
+      body: JSON.stringify(body),
+    }), env, ctx);
+
+  // 单个节点
+  const one = await convert({ json: JSON.stringify({
+    type: "vless", tag: "来自Karing", server: "sub.example.com", server_port: 443,
+    uuid: "11111111-1111-1111-1111-111111111111",
+    tls: { enabled: true, server_name: "sub.example.com", utls: { enabled: true, fingerprint: "chrome" } },
+    transport: { type: "ws", path: "/assets/app.abc.js", headers: { Host: "sub.example.com" } },
+  }) });
+  const oneJ = await one.json();
+  check("单个节点 -> ok", one.status === 200 && oneJ.ok === true, JSON.stringify(oneJ).slice(0, 120));
+  check("转出 1 条链接", Array.isArray(oneJ.links) && oneJ.links.length === 1);
+  check("链接是 vless:// 且含路径与 SNI",
+    oneJ.links[0].startsWith("vless://") && oneJ.links[0].includes("path=%2Fassets%2Fapp.abc.js") &&
+    oneJ.links[0].includes("sni=sub.example.com") && oneJ.links[0].includes("host=sub.example.com"),
+    oneJ.links[0]);
+  check("节点名进了 # 片段", decodeURIComponent(oneJ.links[0].split("#")[1]) === "来自Karing");
+
+  // 完整配置：direct 跳过、自定义头与 mux 记入 lost
+  const full = await convert({ json: JSON.stringify({ outbounds: [
+    { type: "direct", tag: "direct" },
+    { type: "vless", tag: "A", server: "a.example.com", server_port: 443,
+      uuid: "11111111-1111-1111-1111-111111111111",
+      tls: { enabled: true, server_name: "a.example.com" },
+      transport: { type: "ws", path: "/p", headers: { Host: "a.example.com", "X-Origin-Key": "abcdefghijklmnop" } },
+      multiplex: { enabled: true, protocol: "h2mux" } },
+    { type: "trojan", tag: "B", server: "b.example.com", server_port: 8443, password: "pw",
+      tls: { enabled: true, server_name: "b.example.com" }, transport: { type: "grpc", service_name: "gsvc" } },
+  ] }) });
+  const fullJ = await full.json();
+  check("完整配置 -> 2 条链接", fullJ.ok === true && fullJ.links.length === 2, JSON.stringify(fullJ).slice(0, 160));
+  check("direct 不出现在结果里", !fullJ.links.some((l) => l.includes("direct")));
+  check("自定义头写入 lost 并打码", fullJ.lost.some((x) => x.includes("X-Origin-Key") && x.includes("…") && !x.includes("abcdefghijklmnop")),
+    JSON.stringify(fullJ.lost));
+  check("mux 写入 lost", fullJ.lost.some((x) => x.includes("多路复用")));
+  check("trojan 走 grpc", fullJ.links[1].startsWith("trojan://") && fullJ.links[1].includes("type=grpc") && fullJ.links[1].includes("serviceName=gsvc"), fullJ.links[1]);
+
+  // 多个对象首尾相接（Karing 里一条条复制出来的样子）
+  const many = await convert({ json:
+    '{"type":"ss","tag":"S1","server":"s1.example.com","server_port":8388,"method":"aes-128-gcm","password":"p1"}\n' +
+    '{"type":"ss","tag":"S2","server":"s2.example.com","server_port":8388,"method":"aes-128-gcm","password":"p2"}' });
+  const manyJ = await many.json();
+  check("多个对象拼接 -> 2 条", manyJ.ok === true && manyJ.links.length === 2, JSON.stringify(manyJ).slice(0, 120));
+
+  // 端点与导出的函数结果必须一致（命令行版复用的就是它）
+  const direct = mod.outboundToLink({ type: "ss", tag: "S1", server: "s1.example.com", server_port: 8388, method: "aes-128-gcm", password: "p1" });
+  check("导出的 outboundToLink 与端点结果一致", direct.link === manyJ.links[0]);
+  check("导出了 extractOutbounds", typeof mod.extractOutbounds === "function");
+
+  // 失败路径
+  const bad = await convert({ json: "{ 这不是 JSON" });
+  const badJ = await bad.json();
+  check("坏 JSON -> ok:false 且有提示", bad.status === 200 && badJ.ok === false && /JSON/.test(badJ.error), JSON.stringify(badJ));
+  const onlyDirect = await convert({ json: '{"outbounds":[{"type":"direct"}]}' });
+  const odJ = await onlyDirect.json();
+  check("只有 direct -> ok:false 并解释原因", odJ.ok === false && /direct|server/.test(odJ.error), JSON.stringify(odJ));
+  const noUuid = await convert({ json: '{"type":"vless","server":"a.example.com","server_port":443}' });
+  const nuJ = await noUuid.json();
+  check("缺 uuid -> ok:false 且报出原因", nuJ.ok === false && /uuid/.test(nuJ.error), JSON.stringify(nuJ));
+  const empty = await convert({ json: "" });
+  check("空输入 -> ok:false", (await empty.json()).ok === false);
+  check("convert 不写 KV", env.KV.writes === writesBefore, `${env.KV.writes} != ${writesBefore}`);
+
+  // 认证与 CSRF 与 save 完全同一套
+  const noAuthConv = await mod.default.fetch(req(`/${ADMIN_PATH}`, {
+    method: "POST", headers: { "content-type": "application/json", "x-admin-action": "convert" },
+    body: JSON.stringify({ json: "{}" }),
+  }), env, ctx);
+  check("convert 无凭证 -> 401", noAuthConv.status === 401, `status=${noAuthConv.status}`);
+  const noHeader = await mod.default.fetch(req(`/${ADMIN_PATH}`, {
+    method: "POST", headers: { ...basic("admin", ADMIN_PASS), "content-type": "application/json" },
+    body: JSON.stringify({ json: "{}" }),
+  }), env, ctx);
+  check("convert 缺自定义头 -> 403", noHeader.status === 403, `status=${noHeader.status}`);
+  const badOrigin = await convert({ json: "{}" }, {
+    ...basic("admin", ADMIN_PASS), "content-type": "application/json",
+    "x-admin-action": "convert", Origin: "https://evil.example.net",
+  });
+  check("convert 跨站 Origin -> 403", badOrigin.status === 403, `status=${badOrigin.status}`);
+  const notJson = await mod.default.fetch(req(`/${ADMIN_PATH}`, {
+    method: "POST",
+    headers: { ...basic("admin", ADMIN_PASS), "content-type": "application/json", "x-admin-action": "convert" },
+    body: "不是 json",
+  }), env, ctx);
+  check("convert 请求体不是 JSON -> 400", notJson.status === 400, `status=${notJson.status}`);
+}
+
+console.log("--- 10. 管理页的导入界面存在且与端点对齐 ---");
+{
+  const env = mkEnv();
+  const html = await (await mod.default.fetch(req(`/${ADMIN_PATH}`, { headers: basic("admin", ADMIN_PASS) }), env, ctx)).text();
+  check("有「从 JSON 导入节点」按钮", html.includes('id="importBtn"') && html.includes("从 JSON 导入节点"));
+  check("有粘贴框与转换按钮", html.includes('id="importBox"') && html.includes('id="importGo"') && html.includes("转换并追加到节点池"));
+  check("前端带 x-admin-action: convert", html.includes('"x-admin-action": "convert"'));
+  check("前端把新节点并回节点池", html.includes('state.nodes = current') && html.includes("renderSubs()"));
+  check("会提示点保存", /记得点保存/.test(html));
+  check("会显示丢失的字段", html.includes("以下设置标准链接装不下"));
+  // 模板里不能出现反引号或模板插值，否则整个管理页会崩
+  check("嵌入的脚本没有未转义的 </script>", html.indexOf("</script>") === html.lastIndexOf("</script>"), "脚本被提前截断");
+  check("导入面板默认隐藏", /id="importPanel" style="display:none"/.test(html));
+  // 换行符在浏览器里必须真的是换行，而不是字面量 \n
+  check("split/join 用的是真换行", html.includes('.split("\\n")') && !html.includes('.split("\\\\n")'));
+}
+
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail ? 1 : 0);

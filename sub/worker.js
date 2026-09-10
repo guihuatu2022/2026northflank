@@ -80,6 +80,8 @@ const NOT_FOUND_HTML =
   '<meta name="robots" content="noindex"><title>404 Not Found</title>' +
   "</head><body><h1>404 Not Found</h1></body></html>";
 
+export { outboundToLink, extractOutbounds };
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -234,7 +236,9 @@ async function handleAdmin(request, env, ctx, url) {
   if (request.method === "POST") {
     // CSRF：跨站表单设不了自定义头；跨站 fetch 带自定义头会触发 CORS 预检，
     // 而本 Worker 不返回任何 CORS 头，浏览器会直接拦下。Origin 再叠一层。
-    if (request.headers.get("x-admin-action") !== "save") {
+    // convert 走同一套校验 —— 多一个动作不等于多一个入口。
+    const action = request.headers.get("x-admin-action");
+    if (action !== "save" && action !== "convert") {
       return jsonResponse({ ok: false, error: "缺少自定义请求头" }, 403);
     }
     const origin = request.headers.get("Origin");
@@ -247,6 +251,10 @@ async function handleAdmin(request, env, ctx, url) {
       payload = await request.json();
     } catch {
       return jsonResponse({ ok: false, error: "请求体不是合法 JSON" }, 400);
+    }
+
+    if (action === "convert") {
+      return jsonResponse(convertJsonToLinks(String((payload && payload.json) || "")));
     }
 
     const { cfg, warnings } = await normalizeIncoming(payload, env);
@@ -320,6 +328,44 @@ async function normalizeIncoming(payload, env) {
   }
 
   return { cfg: { version: 1, nodes, subs }, warnings };
+}
+
+/**
+ * 把管理页粘进来的 sing-box JSON 转成分享链接。
+ * 跳过 direct / block 这类没有 server 的 outbound。
+ */
+function convertJsonToLinks(text) {
+  const outbounds = extractOutbounds(text);
+  if (!outbounds.length) {
+    return {
+      ok: false,
+      error: "没有识别出 JSON 对象。请确认粘贴的是一段完整的配置（从 { 开始到 } 结束）。",
+    };
+  }
+  const links = [];
+  const lost = [];
+  const failed = [];
+  for (const ob of outbounds) {
+    if (!ob || typeof ob !== "object" || !ob.type || !ob.server) continue;
+    try {
+      const r = outboundToLink(ob);
+      links.push(r.link);
+      for (const x of r.lost) lost.push(x);
+    } catch (err) {
+      failed.push(
+        (ob.tag || ob.name || ob.server || ob.type) + "：" + ((err && err.message) || "转换失败")
+      );
+    }
+  }
+  if (!links.length) {
+    return {
+      ok: false,
+      error: failed.length
+        ? "没有可转换的节点。" + failed.join("；")
+        : "里面没有带 server 的节点（可能只有 direct / block 这类规则型 outbound）。",
+    };
+  }
+  return { ok: true, links, lost, failed };
 }
 
 function parseShareLinkSafe(uri) {
@@ -469,6 +515,20 @@ const ADMIN_HTML = `<!doctype html>
 
 <h2>节点池</h2>
 <p class="hint">一行一个分享链接，支持 vless:// vmess:// trojan:// ss://。链接里 # 后面的内容会作为节点名。</p>
+<div class="row">
+  <button id="importBtn">从 JSON 导入节点</button>
+  <span class="meta">Karing 导不出链接，但可以把配置以 JSON 复制出来 —— 粘进来就能转</span>
+</div>
+<div id="importPanel" style="display:none">
+  <textarea id="importBox" rows="7" spellcheck="false"
+    placeholder="把节点配置 JSON 粘在这里。可以一次粘多个，也可以粘整份含 outbounds 的配置。"></textarea>
+  <div class="row">
+    <button class="primary" id="importGo">转换并追加到节点池</button>
+    <button id="importClose">收起</button>
+    <span id="importStatus" class="meta"></span>
+  </div>
+  <p class="warn" id="importWarn"></p>
+</div>
 <textarea id="nodesBox" rows="8" spellcheck="false"></textarea>
 
 <h2>订阅</h2>
@@ -594,6 +654,64 @@ document.getElementById("subsBox").addEventListener("click", function (e) {
     renderSubs();
     setStatus("已删除，记得点保存");
   }
+});
+
+document.getElementById("importBtn").addEventListener("click", function () {
+  var panel = document.getElementById("importPanel");
+  panel.style.display = panel.style.display === "none" ? "block" : "none";
+});
+
+document.getElementById("importClose").addEventListener("click", function () {
+  document.getElementById("importPanel").style.display = "none";
+});
+
+document.getElementById("importGo").addEventListener("click", function () {
+  var text = document.getElementById("importBox").value.trim();
+  var status = document.getElementById("importStatus");
+  var warn = document.getElementById("importWarn");
+  warn.textContent = "";
+  if (!text) {
+    status.textContent = "先粘贴 JSON";
+    return;
+  }
+  status.textContent = "转换中…";
+  fetch(window.location.pathname, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-admin-action": "convert" },
+    body: JSON.stringify({ json: text })
+  })
+    .then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+    })
+    .then(function (res) {
+      var j = res.j || {};
+      if (!res.ok || !j.ok) throw new Error(j.error || "转换失败");
+      var box = document.getElementById("nodesBox");
+      var current = box.value.split("\\n")
+        .map(function (x) { return x.trim(); })
+        .filter(Boolean);
+      var added = 0;
+      (j.links || []).forEach(function (l) {
+        if (current.indexOf(l) < 0) { current.push(l); added++; }
+      });
+      box.value = current.join("\\n");
+      state.nodes = current;
+      renderSubs();
+      var skipped = (j.links || []).length - added;
+      status.textContent = "已追加 " + added + " 条" +
+        (skipped > 0 ? "（" + skipped + " 条已存在，跳过）" : "") + "，记得点保存";
+      var lines = [];
+      if (j.lost && j.lost.length) {
+        lines.push("以下设置标准链接装不下，已丢弃：\\n  " + j.lost.join("\\n  "));
+      }
+      if (j.failed && j.failed.length) {
+        lines.push("转换失败：\\n  " + j.failed.join("\\n  "));
+      }
+      warn.textContent = lines.join("\\n\\n");
+    })
+    .catch(function (err) {
+      status.textContent = "转换失败：" + err.message;
+    });
 });
 
 document.getElementById("addBtn").addEventListener("click", function () {
@@ -1021,6 +1139,214 @@ function parseSs(uri) {
     }
   }
   return p;
+}
+
+// ═══════════════════════════ JSON 配置 -> 分享链接 ═══════════════════════════
+
+/**
+ * 把 sing-box 格式的节点配置转成标准分享链接。
+ *
+ * 为什么要它：Karing 的「分享」只产出 ulink:// 私有格式，导不出标准链接
+ * （KaringX/karing#1332，作者回复 no plan），但它能把配置以 JSON 复制出来。
+ *
+ * 返回 { link, lost }。lost 列出标准链接**承载不了、因此被丢弃**的字段 ——
+ * 最关键的是自定义 WebSocket 头（例如 X-Origin-Key）。
+ */
+function outboundToLink(obj) {
+  const lost = [];
+  const q = [];
+  const push = (k, v) => {
+    if (v !== undefined && v !== null && v !== "") q.push(k + "=" + v);
+  };
+  const type = String(obj.type || "").toLowerCase();
+  const host = String(obj.server || "");
+  const port = Number(obj.server_port || obj.port || 0);
+  if (!host || !port) throw new Error("缺少 server 或 server_port");
+
+  const applyTls = () => {
+    const tls = obj.tls || {};
+    if (tls.enabled === false) return;
+    const reality = tls.reality || {};
+    const isReality = !!(reality.enabled || reality.public_key || reality.publicKey);
+    const sni = String(tls.server_name || tls.serverName || obj.sni || "");
+    const utls = tls.utls || {};
+    if (isReality) {
+      push("security", "reality");
+      push("pbk", reality.public_key || reality.publicKey || "");
+      push("sid", reality.short_id || reality.shortId || "");
+      if (reality.spider_x || reality.spiderX) push("spx", reality.spider_x || reality.spiderX);
+    } else {
+      push("security", "tls");
+    }
+    push("sni", encodeURIComponent(sni));
+    push("fp", utls.fingerprint || tls.fingerprint || obj.fp || "");
+    if (Array.isArray(tls.alpn) && tls.alpn.length) {
+      push("alpn", encodeURIComponent(tls.alpn.join(",")));
+    }
+    if (tls.insecure || tls.allowInsecure) push("allowInsecure", "1");
+  };
+
+  const applyTransport = () => {
+    const tr = obj.transport || {};
+    const net = String(tr.type || "tcp").toLowerCase();
+    const headers = tr.headers || {};
+    let hostHeader = headers.Host || headers.host || "";
+    if (Array.isArray(hostHeader)) hostHeader = hostHeader[0];
+
+    // 自定义头是标准链接装不下的部分，必须明确告诉用户
+    for (const [k, v] of Object.entries(headers)) {
+      if (/^host$/i.test(k)) continue;
+      const val = Array.isArray(v) ? v.join(", ") : String(v);
+      lost.push(
+        "自定义 WebSocket 头 " + k + ": " + maskSecret(val) +
+          " —— 标准分享链接没有承载它的字段"
+      );
+    }
+
+    if (net === "ws") {
+      push("type", "ws");
+      push("host", encodeURIComponent(String(hostHeader || host)));
+      push("path", encodeURIComponent(String(tr.path || "/")));
+    } else if (net === "grpc") {
+      push("type", "grpc");
+      push("serviceName", encodeURIComponent(String(tr.service_name || tr.serviceName || "")));
+      if (tr.multi_mode || tr.multiMode) push("mode", "multi");
+    } else if (net === "http" || net === "h2") {
+      push("type", "h2");
+      push("host", encodeURIComponent(String(hostHeader || host)));
+      push("path", encodeURIComponent(String(tr.path || "/")));
+    } else {
+      push("type", "tcp");
+      push("headerType", tr.header && tr.header.type ? String(tr.header.type) : "none");
+    }
+  };
+
+  const name = encodeURIComponent(String(obj.tag || obj.name || ""));
+  let link = "";
+
+  if (type === "vless") {
+    const uuid = String(obj.uuid || "");
+    if (!uuid) throw new Error("缺少 uuid");
+    push("encryption", "none");
+    applyTls();
+    if (obj.flow) push("flow", encodeURIComponent(String(obj.flow)));
+    applyTransport();
+    link = "vless://" + uuid + "@" + host + ":" + port + "?" + q.join("&") + "#" + name;
+  } else if (type === "vmess") {
+    const tls = obj.tls || {};
+    const tr = obj.transport || {};
+    const net = String(tr.type || "tcp").toLowerCase();
+    let hostHeader = (tr.headers || {}).Host || (tr.headers || {}).host || host;
+    if (Array.isArray(hostHeader)) hostHeader = hostHeader[0];
+    for (const k of Object.keys(tr.headers || {})) {
+      if (!/^host$/i.test(k)) lost.push("自定义 WebSocket 头 " + k + " —— 无法写进标准链接");
+    }
+    const j = {
+      v: "2",
+      ps: String(obj.tag || obj.name || ""),
+      add: host,
+      port: String(port),
+      id: String(obj.uuid || ""),
+      aid: String(obj.alter_id || obj.alterId || 0),
+      scy: String(obj.security || "auto"),
+      net,
+      type: "none",
+      host: net === "ws" ? String(hostHeader) : "",
+      path: net === "ws" ? String(tr.path || "/") : net === "grpc" ? String(tr.service_name || "") : "",
+      tls: tls.enabled === false ? "" : tls.server_name || tls.serverName ? "tls" : "",
+    };
+    if (j.tls) j.sni = String(tls.server_name || tls.serverName || "");
+    link = "vmess://" + toBase64(JSON.stringify(j));
+  } else if (type === "trojan") {
+    const password = String(obj.password || "");
+    if (!password) throw new Error("缺少 password");
+    const tls = obj.tls || {};
+    push("security", "tls");
+    push("sni", encodeURIComponent(String(tls.server_name || tls.serverName || obj.sni || host)));
+    if (Array.isArray(tls.alpn) && tls.alpn.length) {
+      push("alpn", encodeURIComponent(tls.alpn.join(",")));
+    }
+    applyTransport();
+    link = "trojan://" + encodeURIComponent(password) + "@" + host + ":" + port +
+      "?" + q.join("&") + "#" + name;
+  } else if (type === "shadowsocks" || type === "ss") {
+    const method = String(obj.method || obj.cipher || "");
+    const password = String(obj.password || "");
+    if (!method || !password) throw new Error("缺少 method 或 password");
+    link = "ss://" + toBase64(method + ":" + password) + "@" + host + ":" + port + "#" + name;
+  } else {
+    throw new Error("不支持的 type：" + (type || "(空)"));
+  }
+
+  const mp = obj.multiplex || obj.mux;
+  if (mp && mp.enabled !== false && (mp.enabled || mp.protocol)) {
+    lost.push(
+      "多路复用（mux" + (mp.protocol ? " / " + mp.protocol : "") +
+        "）—— 标准链接没有这个字段，需要在客户端界面里手动开"
+    );
+  }
+  if (obj.udp === false) lost.push("udp: false —— 标准链接无法表达");
+
+  return { link, lost };
+}
+
+function maskSecret(s) {
+  const v = String(s);
+  return v.length <= 12 ? v : v.slice(0, 6) + "…" + v.slice(-4);
+}
+
+/**
+ * 从一段文本里抠出所有顶层 JSON 对象。
+ *
+ * 支持这几种粘法：单个对象、多个对象首尾相接、数组、含 outbounds 的完整配置。
+ * 用花括号配对切分（跳过字符串内部的括号），比按行切更稳。
+ */
+function splitTopLevelObjects(text) {
+  const chunks = [];
+  let depth = 0;
+  let start = -1;
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === "{") { if (depth === 0) start = i; depth++; }
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0 && start >= 0) { chunks.push(text.slice(start, i + 1)); start = -1; }
+    }
+  }
+  return chunks;
+}
+
+/** 把用户粘进来的文本解析成一组 outbound 对象（顺带展开 outbounds 数组）。 */
+function extractOutbounds(text) {
+  const out = [];
+  for (const chunk of splitTopLevelObjects(String(text || ""))) {
+    let v;
+    try { v = JSON.parse(chunk); } catch { continue; }
+    collectOutbounds(v, out);
+  }
+  return out;
+}
+
+function collectOutbounds(v, out) {
+  if (Array.isArray(v)) {
+    for (const x of v) collectOutbounds(x, out);
+    return;
+  }
+  if (!v || typeof v !== "object") return;
+  if (Array.isArray(v.outbounds)) {
+    for (const x of v.outbounds) if (x && typeof x === "object") out.push(x);
+    return;
+  }
+  out.push(v);
 }
 
 // ═══════════════════════════════ 工具 ═══════════════════════════════

@@ -1,0 +1,9 @@
+{
+  "name": "nf-node-sub",
+  "private": true,
+  "type": "module",
+  "description": "订阅服务 + 分享链接转换工具（worker.js 是部署到 Cloudflare 的单文件；其余是本地脚本）",
+  "scripts": {
+    "test": "node test.mjs"
+  }
+}

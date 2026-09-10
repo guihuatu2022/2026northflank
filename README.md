@@ -311,15 +311,41 @@ vless://<NODE_ID>@<你的域名>?encryption=none&security=tls&sni=<你的域名>
 `./sub/make-subscription.sh` 就是拿它们拼出链接的，把打印出来的那条粘进节点池即可。
 
 **如果你只有 Karing 里的配置**：它虽然导不出链接，但可以把配置以 **JSON** 显示/复制出来。
-把那段 JSON 转成标准链接：
+这个 JSON 能直接转成标准链接，有两种转法，随你顺手：
+
+**转法一：在管理页里转（不用装任何东西，推荐）**
+
+管理页「节点池」上方有一个 **`从 JSON 导入节点`** 按钮：
+
+1. 点开它，把 Karing 里复制的 JSON 粘进粘贴框；
+   - 可以一次粘**多个**节点（首尾相接就行）；
+   - 也可以粘**整份配置**（含 `outbounds` 的那种），它会自己挑出里面所有节点；
+2. 点 **`转换并追加到节点池`**，转出来的链接会**追加**到节点池文本框里，
+   已经有的自动跳过（不会重复）；
+3. 看一眼有没有黄色的「已丢弃」提示（见下），然后点 **`保存全部`** 才真正生效。
+
+转换在服务端做，和前端的「保存」走**同一套认证和 CSRF 校验**，并且**不写 KV**——
+它只把结果返回给页面，落盘仍然要你亲自点保存。
+
+**转法二：命令行**
 
 ```sh
 node sub/json-to-link.mjs '{"server":"...","type":"vless",...}'
 ```
 
-它会告诉你**哪些设置标准链接装不下、因此被丢掉了**——最关键的是自定义
-WebSocket 头（例如 `X-Origin-Key`）。丢了它，这条链接就**不能直连源站**，
-但**经 Cloudflare 域名可以用**，因为那一段的头是 Worker 自己加的。
+也可以走管道，输出只有链接（一行一条，方便重定向）：
+
+```sh
+node sub/json-to-link.mjs < karing.json > nodes.txt
+```
+
+两种转法调用的是**同一份函数**（`sub/worker.js` 里的 `outboundToLink`），所以结果一定一致。
+
+**不管用哪种转法，都要留意"被丢掉的设置"**——最关键的是自定义
+WebSocket 头（例如 `X-Origin-Key`）。标准分享链接没有承载自定义头的字段，
+丢了它，这条链接就**不能直连源站**，但**经 Cloudflare 域名可以用**，
+因为那一段的头是 Worker 自己加的。管理页会用黄色文字列出来，命令行会打到 stderr。
+敏感值会打成 `abc…wxyz` 的形式，不会完整显示。
 
 如果你手上有一条来路不明的链接（比如从别处复制的、或在 Karing 里手填过的），
 先核对它和你的容器是否一致：
@@ -486,7 +512,7 @@ Workers 免费版没有按 IP 限速的能力。但配合 128 位随机 token，
 node sub/test.mjs
 ```
 
-覆盖多订阅分流、认证、CSRF、输入校验、`lastFetch` 记录、无 KV 的降级模式，以及管理页嵌入 JSON 的健壮性。
+覆盖多订阅分流、认证、CSRF、输入校验、`lastFetch` 记录、无 KV 的降级模式、管理页嵌入 JSON 的健壮性，以及 JSON→分享链接的转换（含"哪些设置被丢掉了"的判定）。
 
 ### 排障
 
@@ -735,11 +761,12 @@ deploy.sh                      一键部署 Worker 的脚本
 .github/workflows/build.yml    push 后自动构建镜像
 front/                         容器入口（Go）
 sub/
-  worker.js                    订阅服务（KV + 多订阅 + 管理页，单文件粘贴即用）
+  worker.js                    订阅服务（KV + 多订阅 + 管理页 + JSON 转链接，单文件粘贴即用）
   make-subscription.sh         生成管理凭据与第一条节点链接
   check-link.mjs               核对一条分享链接和容器配置是否一致
-  json-to-link.mjs             把 sing-box 的 JSON 配置转成标准分享链接
+  json-to-link.mjs             命令行版：把 sing-box 的 JSON 配置转成标准分享链接
   test.mjs                     订阅逻辑的回归测试
+  package.json                 只是声明 type: module，让上面几个 .mjs 能 import worker.js
 worker/
   src/index.js                 多文件版 Worker（配合 site/ 静态资源）
   standalone.js                单文件版 Worker（伪装站已内联，供控制台粘贴）
