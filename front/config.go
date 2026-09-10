@@ -261,12 +261,28 @@ type sbTransport struct {
 	EarlyDataHdr string `json:"early_data_header_name,omitempty"`
 }
 
+// sbMultiplex enables the server side of sing-box's multiplexing.
+//
+// This must be on for a client that enables multiplexing to work at all:
+// sing-box only installs the mux router when Enabled is true
+// (common/mux/router.go, NewRouterWithOptions). It is safe to leave on for
+// clients that do not use multiplexing, because the router checks whether the
+// connection targets the mux sentinel and otherwise falls straight through to
+// the normal router.
+//
+// Padding stays off: turning it on would reject non-multiplexed connections.
+type sbMultiplex struct {
+	Enabled bool `json:"enabled"`
+	Padding bool `json:"padding"`
+}
+
 type sbInbound struct {
 	Type       string      `json:"type"`
 	Tag        string      `json:"tag"`
 	Listen     string      `json:"listen"`
 	ListenPort int         `json:"listen_port"`
 	Users      []sbUser    `json:"users"`
+	Multiplex  sbMultiplex `json:"multiplex"`
 	Transport  sbTransport `json:"transport"`
 }
 
@@ -302,6 +318,7 @@ func (c *Config) renderSingboxConfig() ([]byte, error) {
 			Listen:     "127.0.0.1",
 			ListenPort: c.UpstreamPort,
 			Users:      []sbUser{{UUID: c.NodeID, Flow: ""}},
+			Multiplex:  sbMultiplex{Enabled: true, Padding: false},
 			Transport: sbTransport{
 				Type:         "ws",
 				Path:         c.WSPath,
