@@ -295,89 +295,128 @@ vless://<NODE_ID>@<你的域名>?encryption=none&security=tls&sni=<你的域名>
 
 ## 订阅地址（可选）
 
-如果你只有一台节点、一两台设备，**手动填客户端配置就够了，不需要订阅**。订阅的意义是：多设备、多节点时，改一次全部生效。
+如果你只有一台节点、一两台设备，**手动填客户端配置就够了，不需要订阅**。订阅的意义是：多设备、多节点、多人时，改一次全部生效。
 
-但订阅 URL 有一个固有性质要先说清楚：**它是不记名凭证**。没有账号密码，URL 本身就是密码——谁拿到 URL，谁就拿到你的全部节点。
+但订阅 URL 有一个固有性质要先说清楚：**它是不记名凭证**。没有账号密码，URL 本身就是密码——谁拿到 URL，谁就拿到那份订阅里的节点。
+
+### 核心：一个地址一份节点
+
+**每个订阅有自己的 token，和一份自己的节点范围。**
+
+你把哪个地址给谁，他就只能拿到你勾选的那几个节点，看不到别人的，也看不到节点池里的其它节点。
+
+| | 订阅 token | 管理员凭证 |
+|---|---|---|
+| 能做什么 | **只读**，且只能读自己那一份 | 读 + 写全部 |
+| 泄露了怎么办 | **单独撤销那一个**，不影响其它订阅 | 全部沦陷 |
+| 会不会出现在 URL 里 | 会（订阅 URL 绕不开） | **不会**（只在认证头里） |
+
+**这是和常见订阅实现最本质的区别**：那些项目的可读和可写往往是同一个 token，而且写入端点没有自己的鉴权。这里写操作走完全独立的凭证——**一个朋友的订阅地址泄露，他拿不到任何写能力。**
+
+### 管理页
+
+`https://订阅域名/<ADMIN_PATH>` → 浏览器弹认证框 → 输入用户名密码。
+
+页面上能做：
+
+- 节点池：一行一个分享链接（`vless://` `vmess://` `trojan://` `ss://`），保存即生效
+- 订阅：新建 / 改名 / 启停 / 勾选包含哪些节点 / 复制地址 / 换 token / 删除
+- 看到每个订阅的「上次取用时间 + 国家」——**这是发现地址被转手的信号**
 
 ### 支持哪些客户端
 
-端点会根据客户端的 User-Agent 自动选格式：
+端点按 User-Agent 自动选格式：
 
 | 客户端 | 拿到什么 |
 |---|---|
-| v2rayN / v2rayNG | base64 节点列表 |
-| Shadowrocket（iOS） | base64 节点列表 |
-| Karing / Hiddify / NekoBox / NekoRay | base64 节点列表 |
-| **Clash / Mihomo / Clash Verge / ClashX / Stash** | **Clash YAML**（Worker 当场转换） |
-| Surge / Quantumult X / Loon | ❌ 需要各自专有格式，本项目不支持 |
-| sing-box 官方 App（SFM/SFA/SFI） | ⚠️ 未核实，官方 App 的订阅支持情况我不确定 |
+| v2rayN / v2rayNG / Shadowrocket / Karing / Hiddify / NekoBox | base64 节点列表 |
+| Clash / Mihomo / Clash Verge / ClashX / Stash | **Clash YAML**（Worker 当场转换） |
+| Surge / Quantumult X / Loon | ❌ 不支持（各自专有格式） |
+| sing-box 官方 App | ⚠️ 未核实 |
 
-想强制指定格式，用 `/<SUB_KEY>/clash` 或 `/<SUB_KEY>/base64`。
+强制指定格式：`/<token>/clash` 或 `/<token>/base64`。
 
-**Clash YAML 是从同一条节点链接在 Worker 里当场转换的，不经过任何第三方**——这正是它和常见实现最大的区别（后者通常把你的节点发给在线订阅转换服务）。
+> **Clash 配置的局限**：生成的是最小可用配置（`MATCH,PROXY`，全部流量走代理），不含分流规则，也**不含 smux**。加分流要引入 rule-provider（第三方依赖）；smux 则是因为 mihomo 的 smux 与 sing-box 服务端的 mux 是否互通我无法验证——加上去一旦不兼容你会直接连不上。想试可以自己加 `smux: {enabled: true}`。
 
-> **Clash 配置的局限**：生成的是**最小可用配置**（`MATCH,PROXY`，全部流量走代理），不含分流规则，也**不含 smux**。如果加上分流规则就要引入 rule-provider（第三方依赖）；smux 则是因为 mihomo 的 smux 与 sing-box 服务端的 mux 是否互通我无法在这里验证——加上去一旦不兼容，你会直接连不上。需要的话可以自己加 `smux: {enabled: true}` 试。
+### 部署（五步）
 
-### 和其它实现的区别
-
-| 网上常见的实现 | 这里 |
-|---|---|
-| 有默认 token（忘设变量就用默认值） | **没有默认值**，变量不合格就不服务 |
-| 访客 token / 每日 token 由主 token 派生 | **不做派生**——派生不增加熵，只增加泄露面 |
-| 带 KV 编辑页，能 POST 改写节点 | **完全只读**，没有编辑页、不处理 POST |
-| 内置第三方聚合订阅地址 | **不向任何第三方发请求** |
-| 调在线服务做格式转换 | Clash YAML **在 Worker 内生成** |
-| 伪装成 nginx 默认页 | 统一 404，没有可指纹的内容 |
-
-### 部署（三步）
-
-**第 1 步：生成参数**
+**第 1 步：生成凭据**
 
 ```sh
 cd ~/cloudflare/nf-node
 ./sub/make-subscription.sh
 ```
 
-它会复用 `~/.nf-node-secrets` 里的凭据，问你隧道域名，然后打印出两个值：`SUB_KEY` 和 `NODES`。
+它会复用 `~/.nf-node-secrets` 里的凭据，问你隧道域名，然后打印出：管理路径、管理密码，以及**你的第一条节点链接**（等下要粘到管理页里）。
 
-想加别的节点，把它们一行一个写进 `~/.nf-node-extra-nodes` 再重跑（支持 `vless://` `vmess://` `trojan://` `ss://`）。
+**第 2 步：新建 Worker 并粘贴代码**
 
-**第 2 步：新建一个 Worker**
+Cloudflare 控制台 → **Workers & Pages** → **Create** → **Worker** → 起名 → **Deploy** → **Edit code** → 把 `sub/worker.js` 全部内容粘进去 → **Deploy**。
 
 ⚠️ 用**独立的域名**，不要和隧道、伪装站共用。
 
-1. Cloudflare 控制台 → **Workers & Pages** → **Create** → **Worker** → 起名 → **Deploy**
-2. **Edit code** → 把 `sub/worker.js` 的全部内容粘进去 → **Deploy**
-3. **Settings** → **Variables and Secrets** → 加两个变量，**两个都选 Secret 类型**：
-   - `SUB_KEY` = 上一步打印的值
-   - `NODES` = 上一步打印的值
-4. **Settings** → **Domains & Routes** → **Add** → **Custom Domain** → 填订阅域名
-5. 如果列表里有 `*.workers.dev`，**删掉**
+**第 3 步：建 KV 并绑定**
 
-**第 3 步：验证**
+**Workers & Pages** → **KV** → **Create namespace**（名字随意，例如 `sub-cfg`）。
 
-```sh
-# base64（用分享链接系的 UA）
-curl -s -A 'v2rayN/6.0' 'https://你的订阅域名/<SUB_KEY>' | base64 -d
+回到 Worker → **Settings** → **Bindings** → **Add** → **KV Namespace**：
 
-# Clash YAML（用 Clash 系的 UA）
-curl -s -A 'clash-verge/2.0' 'https://你的订阅域名/<SUB_KEY>' | head -20
-```
+| 字段 | 填什么 |
+|---|---|
+| Variable name | **`KV`** ← 必须正好是这两个字母 |
+| KV namespace | 选刚建的那个 |
 
-> **注意要加 `-A`。** 默认的 `curl` UA 会被采集器规则拦掉——这是有意的。
+**第 4 步：加三个变量**
+
+**Settings** → **Variables and Secrets**，三个都选 **Secret** 类型：
+
+| 名称 | 值 |
+|---|---|
+| `ADMIN_USER` | `admin`（或你自己改） |
+| `ADMIN_PATH` | 第 1 步打印的 |
+| `ADMIN_PASSWORD` | 第 1 步打印的 |
+
+**第 5 步：绑域名并进入管理页**
+
+**Settings** → **Domains & Routes** → **Add** → **Custom Domain** → 填订阅域名。列表里有 `*.workers.dev` 就删掉。
+
+然后打开 `https://你的订阅域名/<ADMIN_PATH>`，浏览器弹框，输入用户名密码，把第 1 步的节点链接粘进「节点池」，保存，再新建订阅、勾选节点。
 
 ### 环境变量
 
 | 名称 | 必填 | 说明 |
 |---|---|---|
-| `SUB_KEY` | ✅ | 路径里那段随机值，32 位十六进制。**少于 24 位就直接不服务** |
-| `NODES` | ✅ | 节点链接，一行一个；也可以直接填已经 base64 过的内容 |
-| `NODES_CLASH` | | 自己准备的完整 Clash YAML。填了就用它，**不再自动转换** |
-| `UA_MODE` | | `nobrowser`（默认）/ `clients` / `any` |
-| `SUB_NAME` | | 客户端里显示的订阅名，默认 `nf-node` |
+| KV（绑定） | ✅ | KV 命名空间绑定，**变量名必须正好是 `KV`** |
+| `ADMIN_PATH` | ✅ | 管理页路径，≥24 位。少于 24 位管理页直接不存在 |
+| `ADMIN_PASSWORD` | ✅ | 管理页密码，**≥16 位**，少于 16 位管理页直接不存在 |
+| `ADMIN_USER` | | 管理页用户名，默认 `admin` |
+| `SUB_NAME` | | 默认订阅名（订阅自己没取名时用），默认 `nf-node` |
 | `UPDATE_HOURS` | | 建议更新间隔，默认 6 |
+| `UA_MODE` | | `nobrowser`（默认）/ `clients` / `any` |
 | `CLASH_NAMES` | | 自动生成的 Clash 配置里顶层分组名，默认 `PROXY` |
-| `ALERT_WEBHOOK` | | 可选。取订阅时 POST 一条通知（只有事件名 + 国家 + 机房代码，**不含 IP**），用来发现地址被别人用了 |
+| `ALERT_WEBHOOK` | | 可选。取订阅时 POST 通知（只有事件名 + 订阅名 + 国家 + 机房代码，**不含 IP**） |
+
+### 关于管理页的认证，有两个代价要知道
+
+用的是 **HTTP Basic 认证**——就是浏览器弹出的那个原生框。它的好处是**页面内容在认证通过前一个字都不返回**。
+
+但两个代价：
+
+1. **没有真正的登出。** 浏览器一直缓存凭证。要强制踢掉，**改一次密码**（改 `ADMIN_PASSWORD` 即可）。
+2. **`401` 会明确暴露"这个路径需要认证"。** 订阅路径永远是统一 404，但管理路径一旦被猜到就会露出来。
+
+第 2 条无法避免：任何需要登录的页面都必须对外可区分。对策是 `ADMIN_PATH` 也是 128 位随机值，猜不到；再加密码这道锁。
+
+**CSRF 已经处理**：POST 必须带一个自定义头，跨站表单设不了；跨站 fetch 带自定义头会触发 CORS 预检，而本 Worker 不返回任何 CORS 头，浏览器会直接拦下。另外还校验 `Origin`。
+
+### 怀疑某个地址泄露了
+
+1. 管理页上点那个订阅的 **「换 token」**（旧地址立即失效）
+2. 把新地址单独发给对方
+
+不需要动别的订阅。**看「上次取用时间 + 国家」**：如果某个订阅在你没预期的时段、或来自奇怪的国家被取用，那就是信号。
+
+这也是为什么**别把 token 设成好记的字符串**——换起来成本很低，不值得为好记牺牲熵。
 
 ### `UA_MODE` 怎么选
 
@@ -387,35 +426,31 @@ curl -s -A 'clash-verge/2.0' 'https://你的订阅域名/<SUB_KEY>' | head -20
 | `clients` | 只放行已知客户端 UA。最严，但客户端五花八门，有误伤风险 |
 | `any` | 不过滤，只在调试时用 |
 
-**要诚实说明：UA 过滤只是降低噪声，不是安全边界。** 会伪造 UA 的人照样能过。**真正的安全边界是 `SUB_KEY` 的 128 位熵**——那个猜不到。
-
-### 改了节点怎么更新
-
-```sh
-./sub/make-subscription.sh          # 重新生成
-```
-
-然后到 Worker 的 Variables and Secrets 里把 `NODES` 换成新值。**不需要改代码、不需要重新部署。**
-
-### 怀疑地址泄露了怎么办
-
-1. 重跑 `./sub/make-subscription.sh` 拿一个新的 `SUB_KEY`
-2. 在 Worker 里替换 `SUB_KEY`
-3. 在客户端里更新订阅地址
-
-旧的地址立刻失效。这也是为什么**别把 `SUB_KEY` 设成好记的字符串**——更换成本很低，不值得为好记牺牲熵。
-
-如果你设了 `ALERT_WEBHOOK`，别人拿你的地址去取订阅时你会收到通知，这就是泄露的信号。
+**要诚实说明：UA 过滤只是降低噪声，不是安全边界。** 会伪造 UA 的人照样能过。**真正的安全边界是 token 的 128 位熵**——那个猜不到。
 
 ### 关于限速
 
-Workers 免费版没有按 IP 限速的能力。但配合 128 位随机路径，穷举已经不现实。想要更硬的防护，最合适的位置是 **Cloudflare 的 Rate Limiting 规则**（在域名层面配置，不写代码），不过那需要付费套餐。
+Workers 免费版没有按 IP 限速的能力。但配合 128 位随机 token，穷举已经不现实。想要更硬的防护，最合适的位置是 **Cloudflare 的 Rate Limiting 规则**（域名层面配置，不写代码），不过那需要付费套餐。
+
+### 跑一遍测试
+
+`sub/` 下的安全逻辑有可复跑的回归测试：
+
+```sh
+node sub/test.mjs
+```
+
+覆盖多订阅分流、认证、CSRF、输入校验、`lastFetch` 记录、无 KV 的降级模式，以及管理页嵌入 JSON 的健壮性。
 
 ### 排障
 
-对外一律返回 404，所以从外面看不出配置哪里有问题。**用 `npx wrangler tail` 看日志**，配置问题会打在里面（比如 `SUB_KEY 未设置或长度不足`、`解析失败`、`NODES 为空`）。
+配置问题只打在日志里，对外一律 404 或 401，从外面看不出哪里配错了。用：
 
-YAML 生成也可以本地验证——`node sub/worker.js` 不方便直接调用，但你可以部署后用上面第 3 步的 curl 拿到 YAML，再喂给任意 YAML 解析器检查。
+```sh
+npx wrangler tail
+```
+
+常见日志：`ADMIN_PASSWORD 未设置或长度不足`（管理页禁用）、`UA 被拒`、`解析失败`、`该订阅没有任何节点`。
 
 ---
 
@@ -654,8 +689,9 @@ deploy.sh                      一键部署 Worker 的脚本
 .github/workflows/build.yml    push 后自动构建镜像
 front/                         容器入口（Go）
 sub/
-  worker.js                    安全订阅 Worker（单文件，粘贴即用）
-  make-subscription.sh         生成 SUB_KEY 和 NODES
+  worker.js                    订阅服务（KV + 多订阅 + 管理页，单文件粘贴即用）
+  make-subscription.sh         生成管理凭据与第一条节点链接
+  test.mjs                     订阅逻辑的回归测试
 worker/
   src/index.js                 多文件版 Worker（配合 site/ 静态资源）
   standalone.js                单文件版 Worker（伪装站已内联，供控制台粘贴）

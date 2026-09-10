@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
-# 生成部署订阅 Worker 需要的两个值。
+# 生成部署订阅服务需要的东西。
 #
-#   SUB_KEY   路径里那段随机值
-#   NODES     节点列表的 base64 内容（直接粘贴到控制台的变量里）
+#   1. 管理页路径  ADMIN_PATH
+#   2. 管理页密码  ADMIN_PASSWORD
+#   3. 你第一条节点的 vless 链接（等下粘到管理页里）
 #
 # 用法：
 #   ./sub/make-subscription.sh
 #
-# 它会尽量复用 ~/.nf-node-secrets 里的 NODE_ID 和 WS_PATH，
-# 只需要你补一个隧道域名。
+# 会尽量复用 ~/.nf-node-secrets 里的 NODE_ID 和 WS_PATH。
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -21,12 +21,11 @@ warn() { printf '%s%s%s\n' "$YELLOW" "$*" "$OFF"; }
 die()  { printf '%s%s%s\n' "$RED" "$*" "$OFF" >&2; exit 1; }
 
 SECRETS="$HOME/.nf-node-secrets"
-EXTRA="$HOME/.nf-node-extra-nodes"
-OUT="$HOME/.nf-node-subscriber"
+OUT="$HOME/.nf-node-sub-admin"
 
 command -v openssl >/dev/null 2>&1 || die "缺少 openssl：sudo apt install openssl"
 
-# ───────────────────────────────────────────── 读取已有的节点凭据
+# ───────────────────────────────────────────── 节点凭据
 say "1/3  读取节点凭据"
 if [ -f "$SECRETS" ]; then
   # shellcheck disable=SC1090
@@ -35,110 +34,95 @@ if [ -f "$SECRETS" ]; then
 else
   warn "   没有 $SECRETS —— 请先跑一次 ./deploy.sh 生成 NODE_ID / WS_PATH"
 fi
-
 [ -n "${NODE_ID:-}" ] || die "缺少 NODE_ID"
 [ -n "${WS_PATH:-}" ] || die "缺少 WS_PATH"
 
-# ───────────────────────────────────────────── 拼装节点链接
-say "2/3  拼装节点链接"
+# ───────────────────────────────────────────── 拼节点链接
+say "2/3  拼装第一条节点链接"
 
 if [ -f "$OUT" ]; then
   # shellcheck disable=SC1090
   . "$OUT"
 fi
 
-printf '   客户端连接的域名（你绑到 Worker 上的那个，例如 cdn.example.com）'
+printf '   客户端连接的域名（绑到隧道 Worker 上的那个，例如 cdn.example.com）'
 [ -n "${CDN_DOMAIN:-}" ] && printf ' [%s]' "$CDN_DOMAIN"
 printf ': '
 read -r input
 CDN_DOMAIN="${input:-${CDN_DOMAIN:-}}"
 [ -n "$CDN_DOMAIN" ] || die "必须填域名"
+CDN_DOMAIN="${CDN_DOMAIN#http://}"; CDN_DOMAIN="${CDN_DOMAIN#https://}"; CDN_DOMAIN="${CDN_DOMAIN%/}"
 
-printf '   节点在客户端里显示的名字 [%s]: ' "${NODE_NAME:-nf-node}"
+printf '   节点显示名 [nf-node]: '
 read -r input
 NODE_NAME="${input:-${NODE_NAME:-nf-node}}"
 
-printf '   Clash / sing-box 用的 uTLS 指纹 [chrome]: '
-read -r input
-FINGERPRINT="${input:-chrome}"
-
-# 清理域名
-CDN_DOMAIN="${CDN_DOMAIN#http://}"; CDN_DOMAIN="${CDN_DOMAIN#https://}"; CDN_DOMAIN="${CDN_DOMAIN%/}"
-
-# 早数据 ed 的取值：跟容器里的 MAX_EARLY_DATA 对应
 ED="${MAX_EARLY_DATA:-2048}"
-
-VLESS="vless://${NODE_ID}@${CDN_DOMAIN}:443"
-VLESS+="?encryption=none&security=tls&sni=${CDN_DOMAIN}"
+VLESS="vless://${NODE_ID}@${CDN_DOMAIN}:443?encryption=none&security=tls&sni=${CDN_DOMAIN}"
 VLESS+="&type=ws&host=${CDN_DOMAIN}&path=${WS_PATH}"
 [ "$ED" != "0" ] && VLESS+="&ed=${ED}"
 VLESS+="#${NODE_NAME}"
 
-NODES="$VLESS"
+printf '\n   节点链接：\n     %s\n' "$VLESS"
 
-# 允许追加别的节点（一行一个链接）
-if [ -f "$EXTRA" ]; then
-  extra_count=$(grep -c '://' "$EXTRA" 2>/dev/null || echo 0)
-  if [ "$extra_count" -gt 0 ]; then
-    NODES="$(printf '%s\n%s' "$NODES" "$(grep '://' "$EXTRA")")"
-    ok "   已追加 $extra_count 条来自 $EXTRA 的节点"
-  fi
-else
-  printf '\n'
-  warn "   提示：如果还想加别的节点，把它们一行一个写进 $EXTRA 再重跑本脚本"
-fi
+# ───────────────────────────────────────────── 管理凭据
+say "3/3  生成管理凭据"
+ADMIN_PATH="$(openssl rand -hex 16)"
+ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '\n')"
+ADMIN_USER="${ADMIN_USER:-admin}"
 
-printf '\n   生成的节点链接：\n     %s\n' "$VLESS"
-
-# ───────────────────────────────────────────── 生成 SUB_KEY 与 base64
-say "3/3  生成订阅参数"
-
-SUB_KEY="$(openssl rand -hex 16)"
-NODES_B64="$(printf '%s' "$NODES" | base64 -w0)"
-
-# 存档，方便以后重跑（含凭据，所以放家目录并限权）
 ( umask 077; cat > "$OUT" <<EOF
 # 由 sub/make-subscription.sh 生成，含凭据，不要提交到任何仓库
 CDN_DOMAIN=$CDN_DOMAIN
 NODE_NAME=$NODE_NAME
+ADMIN_PATH=$ADMIN_PATH
+ADMIN_PASSWORD=$ADMIN_PASSWORD
+ADMIN_USER=$ADMIN_USER
 EOF
 )
 chmod 600 "$OUT"
 
+printf '   管理密码：%s\n' "$ADMIN_PASSWORD"
+
 cat <<EOF
 
   ─────────────────────────────────────────────────────────────
-  在 Cloudflare 控制台新建一个 Worker，然后把 sub/worker.js 整个粘进去。
-  接着在 Settings -> Variables and Secrets 里添加下面两个变量
-  （类型选 Secret，两个都选）：
+  部署步骤
 
-    SUB_KEY =
-${SUB_KEY}
+  1) Cloudflare 控制台新建一个 Worker，把 sub/worker.js 整个粘进去。
 
-    NODES =
-${NODES_B64}
+  2) Workers & Pages -> KV -> Create namespace，随便起个名（例如 sub-cfg）。
+     回到 Worker 的 Settings -> Bindings -> Add -> KV Namespace：
+        Variable name:  KV          <-- 必须正好是 KV
+        KV namespace:   选刚建的那个
+
+  3) Settings -> Variables and Secrets 里加三个 Secret：
+
+        ADMIN_USER =
+${ADMIN_USER}
+
+        ADMIN_PATH =
+${ADMIN_PATH}
+
+        ADMIN_PASSWORD =
+${ADMIN_PASSWORD}
+
+  4) Settings -> Domains & Routes -> Add -> Custom Domain，绑你的订阅域名。
+     如果列表里有 *.workers.dev，删掉。
+
+  5) 打开管理页：
+
+        https://你的订阅域名/${ADMIN_PATH}
+
+     浏览器会弹认证框，用户名 ${ADMIN_USER}，密码就是上面的管理密码。
+     进去后把这条节点链接粘进「节点池」，保存，再新建订阅、勾选节点。
+
   ─────────────────────────────────────────────────────────────
+  这些值也存了一份（权限 600）：${OUT}
+  想再看：cat ${OUT}
 
-  绑定好你的订阅域名之后，订阅地址就是：
-
-    https://${CDN_DOMAIN}/${SUB_KEY}
-
-  客户端会按 UA 自动选择格式：
-    v2rayN / v2rayNG / Shadowrocket / Karing / Hiddify  -> base64 节点列表
-    Clash / Mihomo / Clash Verge / Stash                 -> Clash YAML
-    （YAML 由 Worker 当场从同一条链接转换，不经过任何第三方）
-
-  想强制指定格式，用：
-
-    https://${CDN_DOMAIN}/${SUB_KEY}/clash
-    https://${CDN_DOMAIN}/${SUB_KEY}/base64
-
-  验证（用客户端 UA，否则会被 UA 规则拦掉）：
-
-    curl -s -A 'v2rayN/6.0' 'https://${CDN_DOMAIN}/${SUB_KEY}' | head -c 120; echo
-
-  这两个值也存了一份在这里，权限 600：
-    ${OUT}
+  注意：管理密码是随机串，请存进你的密码管理器。
+  它一旦泄露，别人就能改你的全部节点和订阅。
 EOF
 
 ok "完成。"
