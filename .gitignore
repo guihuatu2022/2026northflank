@@ -1,0 +1,19 @@
+# 本地与运行时的秘密值：绝不能提交
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+config.json
+
+# 构建与依赖产物
+node_modules/
+.wrangler/
+.worker/
+dist/
+front/gateway
+front/engine
+
+# 杂项
+*.log

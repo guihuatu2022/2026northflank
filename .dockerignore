@@ -1,0 +1,10 @@
+.git
+.github
+.idea
+.vscode
+worker
+docker-compose.yml
+.env
+.env.*
+*.log
+node_modules

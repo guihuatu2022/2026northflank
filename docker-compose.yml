@@ -1,0 +1,27 @@
+# 本地冒烟测试。
+#
+#   cp .env.example .env   # 然后填写
+#   docker compose up --build
+#
+# 容器需要有外网出口才能真正用起来，但 README 验收清单里的检查项
+# 不需要外网也能全部跑通。
+
+services:
+  node:
+    build:
+      context: .
+      args:
+        SING_BOX_VERSION: v1.14.0
+    image: nf-node:local
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      NODE_ID: "${NODE_ID:?请在 .env 里设置 NODE_ID}"
+      WS_PATH: "${WS_PATH:?请在 .env 里设置 WS_PATH}"
+      ORIGIN_SECRET: "${ORIGIN_SECRET:-}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      MAX_EARLY_DATA: "${MAX_EARLY_DATA:-2048}"
+      MAX_CONNS: "${MAX_CONNS:-300}"
+    security_opt:
+      - no-new-privileges:true

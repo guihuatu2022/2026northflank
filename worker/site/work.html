@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Work — Slatepath Software</title>
+<meta name="description" content="Selected engagements: dispatch scheduling, claims reconciliation and inventory reporting.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/">Slate<span>path</span></a>
+    <nav>
+      <a href="/about.html">About</a>
+      <a href="/services.html">Services</a>
+      <a href="/work.html">Work</a>
+      <a href="/blog.html">Notes</a>
+      <a href="/contact.html">Contact</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <h1>Selected work</h1>
+    <p class="lead">
+      A few engagements we can describe publicly. Client names are omitted where
+      the work touches internal processes.
+    </p>
+
+    <hr>
+
+    <h2>Dispatch scheduling for a regional courier</h2>
+    <p class="post-meta">2025 · eight weeks · internal tool</p>
+    <p>
+      A courier with roughly ninety drivers was scheduling routes in a shared
+      spreadsheet that three dispatchers edited simultaneously. Conflicts were
+      discovered by phone call. We replaced it with a scheduling screen backed
+      by Postgres, kept the spreadsheet import so nothing was lost, and added a
+      conflict check that runs before a route is published.
+    </p>
+    <p>
+      Next-day schedule conflicts dropped from a daily occurrence to a handful
+      per month. The dispatchers kept their existing process; only the
+      bookkeeping moved.
+    </p>
+
+    <h2>Claims reconciliation for an insurance broker</h2>
+    <p class="post-meta">2024 · five months · reporting pipeline</p>
+    <p>
+      Monthly reconciliation between a policy administration system and a
+      carrier feed took two analysts about six days per cycle. We built a
+      scheduled job that ingests both feeds, matches on a composite key,
+      classifies the remainder into a small set of exception buckets, and writes
+      a review queue.
+    </p>
+    <p>
+      The cycle now takes roughly half a day, almost all of it spent on genuine
+      exceptions rather than on matching rows.
+    </p>
+
+    <h2>Inventory reporting for a specialty food distributor</h2>
+    <p class="post-meta">2024 · three months · reporting pipeline</p>
+    <p>
+      Stock figures in the warehouse system and the accounting system disagreed
+      by a few percent, and nobody could say why. We traced the difference to
+      three separate timing assumptions in the nightly sync, documented them,
+      and rebuilt the sync with explicit handling for each.
+    </p>
+
+    <h2>Rescue: a stalled customer portal</h2>
+    <p class="post-meta">2023 · six weeks · rescue</p>
+    <p>
+      An eighteen-month portal project had been paused with roughly two thirds
+      of the planned features built and no deploy pipeline. We spent two weeks
+      assessing, recommended cutting five of the remaining features, then got
+      the rest deployed and documented.
+    </p>
+
+    <hr>
+    <p class="small muted">
+      Longer case notes, including the approaches we rejected and why, are
+      available under NDA on request.
+    </p>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>
+      © 2026 Slatepath Software · Portland, Oregon ·
+      <a href="/privacy.html">Privacy</a> ·
+      <a href="/terms.html">Terms</a>
+    </p>
+  </div>
+</footer>
+
+<script src="/assets/site.js" defer></script>
+</body>
+</html>

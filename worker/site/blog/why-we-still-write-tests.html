@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why we still write tests for internal tools — Slatepath Software</title>
+<meta name="description" content="Internal code has no users and no marketing page, which makes it easy to treat carelessly. It is also the code that survives longest.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/">Slate<span>path</span></a>
+    <nav>
+      <a href="/about.html">About</a>
+      <a href="/services.html">Services</a>
+      <a href="/work.html">Work</a>
+      <a href="/blog.html">Notes</a>
+      <a href="/contact.html">Contact</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <h1>Why we still write tests for internal tools</h1>
+    <p class="post-meta">24 June 2026 · 6 minute read</p>
+
+    <p>
+      There is a common assumption that internal software can skip the
+      discipline applied to customer-facing products. Nobody outside the company
+      sees it, the blast radius is small, and the people using it can be told
+      about a quirk. All of that is true, and it is the reason internal software
+      is often in poor shape five years later.
+    </p>
+
+    <h2>The longevity argument</h2>
+    <p>
+      Customer-facing software gets rewritten when the market moves. Internal
+      software gets maintained. The reconciliation job we wrote in 2019 is still
+      running, still owned by the same team, and has outlived two of the systems
+      it reads from. Products die of neglect or competition; internal tools tend
+      to survive because replacing them requires exactly the organisational
+      energy that was missing when they were built.
+    </p>
+    <p>
+      Code with a long life and a low change rate is precisely where tests pay
+      off, because the cost of a regression is a human rechecking numbers by
+      hand.
+    </p>
+
+    <h2>What we actually test</h2>
+    <p>
+      Not everything. We are not chasing a coverage number. In practice the
+      tests concentrate in three places.
+    </p>
+    <ul>
+      <li>
+        <strong>Transformations.</strong> Anything that turns one shape of data
+        into another gets tests with fixtures taken from production. These catch
+        the majority of real defects and they are cheap to write.
+      </li>
+      <li>
+        <strong>Boundaries.</strong> Date handling, currency rounding, and
+        anything involving a timezone. A reconciliation report that is off by
+        one day at month end is worse than a report that fails loudly.
+      </li>
+      <li>
+        <strong>The parts that failed once.</strong> Every production incident
+        gets a test that reproduces it before the fix lands. This is the highest
+        value test in the suite, because it is the only one with evidence that
+        the bug is reachable.
+      </li>
+    </ul>
+
+    <h2>What we do not test</h2>
+    <p>
+      Layout, most glue code, and anything that is a thin wrapper over a
+      library. We also do not build elaborate mocks around the database; a test
+      container running the same engine version as production is faster to
+      write and finds more.
+    </p>
+
+    <h2>The handover argument</h2>
+    <p>
+      The strongest reason is not defect prevention. It is that tests are
+      executable documentation for whoever inherits the project. A new engineer
+      can read the transformation tests and learn what the system believes about
+      the data — which is the question that actually takes time to answer when
+      picking up unfamiliar code.
+    </p>
+    <p>
+      Handover is part of our engagements by policy. Tests are how that promise
+      stays affordable.
+    </p>
+
+    <hr>
+    <p class="small">
+      <a href="/blog.html">← Back to notes</a>
+    </p>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>
+      © 2026 Slatepath Software · Portland, Oregon ·
+      <a href="/privacy.html">Privacy</a> ·
+      <a href="/terms.html">Terms</a>
+    </p>
+  </div>
+</footer>
+
+<script src="/assets/site.js" defer></script>
+</body>
+</html>

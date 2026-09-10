@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nf-node-edge",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-01",
+
+  // 关闭 workers.dev 分配域与预览域：这些域名会被扫描器枚举到。
+  // 部署后必须绑定自定义域名才能访问，步骤见 README。
+  "workers_dev": false,
+  "preview_urls": false,
+
+  "assets": {
+    "directory": "./site",
+    "binding": "ASSETS",
+
+    // Worker 在资源层之前运行并自行解析页面，保证秘密前缀按客户端原始请求
+    // 逐字节匹配 —— 资源层的路径改写绝不能碰到它。
+    "run_worker_first": true,
+
+    // 不做扩展名/斜杠的自动处理：/about 到 /about.html 的映射由 Worker 显式完成。
+    "html_handling": "none",
+    "not_found_handling": "none"
+  }
+}

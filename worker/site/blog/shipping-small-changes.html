@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shipping small changes on purpose — Slatepath Software</title>
+<meta name="description" content="Why our default unit of work is one afternoon, not one quarter.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <a class="brand" href="/">Slate<span>path</span></a>
+    <nav>
+      <a href="/about.html">About</a>
+      <a href="/services.html">Services</a>
+      <a href="/work.html">Work</a>
+      <a href="/blog.html">Notes</a>
+      <a href="/contact.html">Contact</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <h1>Shipping small changes on purpose</h1>
+    <p class="post-meta">12 August 2026 · 5 minute read</p>
+
+    <p>
+      On most engagements we aim for a deployable change roughly every
+      afternoon. Not a demo, not a branch — something running in the client's
+      environment that a real person can use. It sounds obvious and it is
+      harder than it looks, so it is worth writing down what it actually
+      requires and where it stops working.
+    </p>
+
+    <h2>What it requires</h2>
+    <p>
+      The deploy pipeline has to exist in week one, before there is anything
+      worth deploying. We treat that as part of discovery rather than as
+      infrastructure work to be done later. A pipeline built in week one takes
+      two days; the same pipeline built in month four, after three people have
+      developed opinions about it, takes three weeks.
+    </p>
+    <p>
+      It also requires that the thing being built can be sliced. A reporting
+      pipeline that ingests four sources can usually ship source by source, with
+      a manual step standing in for the missing ones. An admin panel can ship
+      read-only before it ships writable. Finding the slice is most of the
+      design work.
+    </p>
+    <p>
+      The last requirement is the least comfortable: someone has to be willing
+      to look at something unfinished. An early deploy means the client sees
+      rough edges. We would rather they see those in week two than discover them
+      in month six.
+    </p>
+
+    <h2>What it buys</h2>
+    <p>
+      Feedback arrives while it is still cheap to act on. In practice this is
+      the whole argument. On a recent scheduling tool, the first deployed
+      version had the dispatcher choosing a route order manually. Watching
+      someone use it for twenty minutes showed us that the ordering rule was
+      obvious enough to automate. That change would have been an argument in a
+      specification document and a two-line fix after a deploy.
+    </p>
+    <p>
+      It also keeps the project honest about progress. A weekly demo can be
+      prepared; a deploy cannot be faked.
+    </p>
+
+    <h2>Where it does not apply</h2>
+    <p>
+      Two cases. First, data migrations. There is no useful half-migrated state,
+      so we plan those as single events with a rehearsal on a copy. Second,
+      anything with a compliance gate — a change that requires an auditor's
+      sign-off should be batched deliberately rather than shipped daily.
+    </p>
+    <p>
+      Outside those, small and often is the default, and we would need a reason
+      to do otherwise.
+    </p>
+
+    <hr>
+    <p class="small">
+      <a href="/blog.html">← Back to notes</a>
+    </p>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p>
+      © 2026 Slatepath Software · Portland, Oregon ·
+      <a href="/privacy.html">Privacy</a> ·
+      <a href="/terms.html">Terms</a>
+    </p>
+  </div>
+</footer>
+
+<script src="/assets/site.js" defer></script>
+</body>
+</html>

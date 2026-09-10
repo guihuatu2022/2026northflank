@@ -1,0 +1,230 @@
+:root {
+  --bg: #ffffff;
+  --bg-soft: #f6f7f9;
+  --fg: #14171a;
+  --fg-muted: #5b6570;
+  --line: #e3e6ea;
+  --accent: #1f5f8b;
+  --radius: 10px;
+  --measure: 46rem;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+}
+
+.wrap {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+/* header ------------------------------------------------------------------ */
+
+.site-header {
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.site-header .wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 4rem;
+  flex-wrap: wrap;
+}
+
+.brand {
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  font-size: 1.0625rem;
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.brand span { color: var(--accent); }
+
+.site-header nav {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.site-header nav a {
+  color: var(--fg-muted);
+  text-decoration: none;
+  font-size: 0.9375rem;
+}
+
+.site-header nav a:hover,
+.site-header nav a[aria-current="page"] { color: var(--fg); }
+
+/* main -------------------------------------------------------------------- */
+
+main { padding: 3rem 0 4rem; }
+
+h1 {
+  font-size: 2rem;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+  margin: 0 0 1rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+  letter-spacing: -0.01em;
+  margin: 2.5rem 0 0.75rem;
+}
+
+h3 {
+  font-size: 1.0625rem;
+  margin: 1.75rem 0 0.5rem;
+}
+
+p { margin: 0 0 1.1rem; }
+
+.lead {
+  font-size: 1.125rem;
+  color: var(--fg-muted);
+  max-width: 38rem;
+}
+
+a { color: var(--accent); }
+
+ul, ol { padding-left: 1.2rem; }
+li { margin: 0.35rem 0; }
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 2.5rem 0;
+}
+
+.muted { color: var(--fg-muted); }
+.small { font-size: 0.875rem; }
+
+.post-meta {
+  color: var(--fg-muted);
+  font-size: 0.875rem;
+  margin: -0.5rem 0 1.5rem;
+}
+
+/* cards ------------------------------------------------------------------- */
+
+.cards {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  margin: 2rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.125rem 1.25rem;
+  background: var(--bg-soft);
+}
+
+.card h3 { margin: 0 0 0.4rem; font-size: 1rem; }
+
+.card p {
+  margin: 0;
+  font-size: 0.9375rem;
+  color: var(--fg-muted);
+}
+
+/* posts ------------------------------------------------------------------- */
+
+.post-list {
+  list-style: none;
+  padding: 0;
+  margin: 1.5rem 0 0;
+}
+
+.post-list li {
+  padding: 1.25rem 0;
+  border-top: 1px solid var(--line);
+  margin: 0;
+}
+
+.post-list h3 { margin: 0 0 0.25rem; }
+
+.post-list .date {
+  display: block;
+  color: var(--fg-muted);
+  font-size: 0.8125rem;
+  margin-bottom: 0.35rem;
+}
+
+.post-list p { margin: 0; color: var(--fg-muted); font-size: 0.9375rem; }
+
+/* forms ------------------------------------------------------------------- */
+
+form { margin: 1.5rem 0; }
+
+label {
+  display: block;
+  font-size: 0.875rem;
+  margin: 0 0 0.3rem;
+}
+
+input, textarea, select {
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  background: var(--bg);
+  color: inherit;
+}
+
+textarea { min-height: 8rem; resize: vertical; }
+
+.field { margin-bottom: 1rem; }
+
+button {
+  font: inherit;
+  padding: 0.6rem 1.1rem;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+button:hover { filter: brightness(1.08); }
+
+/* footer ------------------------------------------------------------------ */
+
+.site-footer {
+  border-top: 1px solid var(--line);
+  padding: 1.75rem 0 2.5rem;
+  color: var(--fg-muted);
+  font-size: 0.875rem;
+}
+
+.site-footer p { margin: 0; }
+
+/* dark mode --------------------------------------------------------------- */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101214;
+    --bg-soft: #171a1d;
+    --fg: #e8eaec;
+    --fg-muted: #9aa3ac;
+    --line: #262b30;
+    --accent: #6cb2e0;
+  }
+}
