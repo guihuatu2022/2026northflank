@@ -299,7 +299,26 @@ vless://<NODE_ID>@<你的域名>?encryption=none&security=tls&sni=<你的域名>
 
 但订阅 URL 有一个固有性质要先说清楚：**它是不记名凭证**。没有账号密码，URL 本身就是密码——谁拿到 URL，谁就拿到你的全部节点。
 
-所以这里的实现和网上常见的那些不一样，刻意砍掉了几乎所有功能：
+### 支持哪些客户端
+
+端点会根据客户端的 User-Agent 自动选格式：
+
+| 客户端 | 拿到什么 |
+|---|---|
+| v2rayN / v2rayNG | base64 节点列表 |
+| Shadowrocket（iOS） | base64 节点列表 |
+| Karing / Hiddify / NekoBox / NekoRay | base64 节点列表 |
+| **Clash / Mihomo / Clash Verge / ClashX / Stash** | **Clash YAML**（Worker 当场转换） |
+| Surge / Quantumult X / Loon | ❌ 需要各自专有格式，本项目不支持 |
+| sing-box 官方 App（SFM/SFA/SFI） | ⚠️ 未核实，官方 App 的订阅支持情况我不确定 |
+
+想强制指定格式，用 `/<SUB_KEY>/clash` 或 `/<SUB_KEY>/base64`。
+
+**Clash YAML 是从同一条节点链接在 Worker 里当场转换的，不经过任何第三方**——这正是它和常见实现最大的区别（后者通常把你的节点发给在线订阅转换服务）。
+
+> **Clash 配置的局限**：生成的是**最小可用配置**（`MATCH,PROXY`，全部流量走代理），不含分流规则，也**不含 smux**。如果加上分流规则就要引入 rule-provider（第三方依赖）；smux 则是因为 mihomo 的 smux 与 sing-box 服务端的 mux 是否互通我无法在这里验证——加上去一旦不兼容，你会直接连不上。需要的话可以自己加 `smux: {enabled: true}` 试。
+
+### 和其它实现的区别
 
 | 网上常见的实现 | 这里 |
 |---|---|
@@ -307,7 +326,7 @@ vless://<NODE_ID>@<你的域名>?encryption=none&security=tls&sni=<你的域名>
 | 访客 token / 每日 token 由主 token 派生 | **不做派生**——派生不增加熵，只增加泄露面 |
 | 带 KV 编辑页，能 POST 改写节点 | **完全只读**，没有编辑页、不处理 POST |
 | 内置第三方聚合订阅地址 | **不向任何第三方发请求** |
-| 在线订阅转换（Clash / sing-box） | 格式由你给的变量决定，不调第三方 |
+| 调在线服务做格式转换 | Clash YAML **在 Worker 内生成** |
 | 伪装成 nginx 默认页 | 统一 404，没有可指纹的内容 |
 
 ### 部署（三步）
@@ -321,7 +340,7 @@ cd ~/cloudflare/nf-node
 
 它会复用 `~/.nf-node-secrets` 里的凭据，问你隧道域名，然后打印出两个值：`SUB_KEY` 和 `NODES`。
 
-想加别的节点，把它们一行一个写进 `~/.nf-node-extra-nodes` 再重跑。
+想加别的节点，把它们一行一个写进 `~/.nf-node-extra-nodes` 再重跑（支持 `vless://` `vmess://` `trojan://` `ss://`）。
 
 **第 2 步：新建一个 Worker**
 
@@ -338,10 +357,12 @@ cd ~/cloudflare/nf-node
 **第 3 步：验证**
 
 ```sh
+# base64（用分享链接系的 UA）
 curl -s -A 'v2rayN/6.0' 'https://你的订阅域名/<SUB_KEY>' | base64 -d
-```
 
-能看到节点链接就成功了。
+# Clash YAML（用 Clash 系的 UA）
+curl -s -A 'clash-verge/2.0' 'https://你的订阅域名/<SUB_KEY>' | head -20
+```
 
 > **注意要加 `-A`。** 默认的 `curl` UA 会被采集器规则拦掉——这是有意的。
 
@@ -351,18 +372,19 @@ curl -s -A 'v2rayN/6.0' 'https://你的订阅域名/<SUB_KEY>' | base64 -d
 |---|---|---|
 | `SUB_KEY` | ✅ | 路径里那段随机值，32 位十六进制。**少于 24 位就直接不服务** |
 | `NODES` | ✅ | 节点链接，一行一个；也可以直接填已经 base64 过的内容 |
-| `NODES_CLASH` | | Clash / Mihomo 用的完整 YAML。不填则 Clash 客户端也拿 base64 |
+| `NODES_CLASH` | | 自己准备的完整 Clash YAML。填了就用它，**不再自动转换** |
 | `UA_MODE` | | `nobrowser`（默认）/ `clients` / `any` |
 | `SUB_NAME` | | 客户端里显示的订阅名，默认 `nf-node` |
 | `UPDATE_HOURS` | | 建议更新间隔，默认 6 |
-| `ALERT_WEBHOOK` | | 可选。每次取订阅时 POST 一条通知（只有事件名 + 国家 + 机房代码，**不含 IP**），用来发现地址被别人用了 |
+| `CLASH_NAMES` | | 自动生成的 Clash 配置里顶层分组名，默认 `PROXY` |
+| `ALERT_WEBHOOK` | | 可选。取订阅时 POST 一条通知（只有事件名 + 国家 + 机房代码，**不含 IP**），用来发现地址被别人用了 |
 
 ### `UA_MODE` 怎么选
 
 | 值 | 行为 |
 |---|---|
 | **`nobrowser`（默认）** | 拒绝浏览器和常见采集器（curl、python-requests、go-http-client…），其余放行 |
-| `clients` | 只放行已知客户端 UA（v2rayN、Clash、sing-box、Shadowrocket…）。最严，但客户端五花八门，有误伤风险 |
+| `clients` | 只放行已知客户端 UA。最严，但客户端五花八门，有误伤风险 |
 | `any` | 不过滤，只在调试时用 |
 
 **要诚实说明：UA 过滤只是降低噪声，不是安全边界。** 会伪造 UA 的人照样能过。**真正的安全边界是 `SUB_KEY` 的 128 位熵**——那个猜不到。
@@ -391,7 +413,9 @@ Workers 免费版没有按 IP 限速的能力。但配合 128 位随机路径，
 
 ### 排障
 
-对外一律返回 404，所以从外面看不出配置哪里有问题。**用 `npx wrangler tail` 看日志**，配置问题会打在里面（比如 `SUB_KEY 未设置或长度不足`）。
+对外一律返回 404，所以从外面看不出配置哪里有问题。**用 `npx wrangler tail` 看日志**，配置问题会打在里面（比如 `SUB_KEY 未设置或长度不足`、`解析失败`、`NODES 为空`）。
+
+YAML 生成也可以本地验证——`node sub/worker.js` 不方便直接调用，但你可以部署后用上面第 3 步的 curl 拿到 YAML，再喂给任意 YAML 解析器检查。
 
 ---
 

@@ -123,7 +123,11 @@ ${NODES_B64}
 
     https://${CDN_DOMAIN}/${SUB_KEY}
 
-  Clash / Mihomo 客户端会自动拿到 base64（除非你另外设置了 NODES_CLASH）。
+  客户端会按 UA 自动选择格式：
+    v2rayN / v2rayNG / Shadowrocket / Karing / Hiddify  -> base64 节点列表
+    Clash / Mihomo / Clash Verge / Stash                 -> Clash YAML
+    （YAML 由 Worker 当场从同一条链接转换，不经过任何第三方）
+
   想强制指定格式，用：
 
     https://${CDN_DOMAIN}/${SUB_KEY}/clash
